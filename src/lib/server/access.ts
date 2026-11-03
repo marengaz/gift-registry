@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import type { DatabaseConnection } from './db/client';
 import {
 	entries,
@@ -164,12 +164,21 @@ export function visibleLists(connection: DatabaseConnection, actor: Actor) {
 			role: fresh.administrator ? ('administrator' as const) : listRole(connection, fresh, list.id)
 		}));
 }
-export function visibleEntries(connection: DatabaseConnection, actor: Actor, listId?: string) {
+export function visibleEntries(
+	connection: DatabaseConnection,
+	actor: Actor,
+	filter: { listId?: string; productId?: string } = {}
+) {
 	const fresh = requireMember(connection, actor);
 	return connection.db
 		.select()
 		.from(entries)
-		.where(listId ? eq(entries.listId, listId) : undefined)
+		.where(
+			and(
+				filter.listId ? eq(entries.listId, filter.listId) : undefined,
+				filter.productId ? eq(entries.productId, filter.productId) : undefined
+			)
+		)
 		.all()
 		.filter(
 			(entry) =>
@@ -213,7 +222,7 @@ export function projectProduct(connection: DatabaseConnection, actor: Actor, pro
 	return {
 		...details,
 		...(fresh.administrator ? { contributorId } : {}),
-		entries: visibleEntries(connection, fresh).filter((entry) => entry.productId === productId),
+		entries: visibleEntries(connection, fresh, { productId }),
 		offers: connection.db.select().from(offers).where(eq(offers.productId, productId)).all(),
 		media: connection.db
 			.select({ id: media.id, mimeType: media.mimeType, originalName: media.originalName })

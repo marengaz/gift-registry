@@ -126,18 +126,28 @@ function setDetails(connection: DatabaseConnection, id: string, input: CaptureIn
 		const label = connection.db.select().from(labels).where(eq(labels.name, name)).get()!;
 		connection.db.insert(productLabels).values({ productId: id, labelId: label.id }).run();
 	}
+	const previous = connection.db.select().from(offers).where(eq(offers.productId, id)).all();
 	connection.db.delete(offers).where(eq(offers.productId, id)).run();
-	for (const link of input.offers)
+	for (const link of input.offers) {
+		const match = previous.findIndex(
+			(saved) =>
+				new URL(saved.url).href === new URL(link.url).href &&
+				saved.priceMinor === (link.priceMinor ?? null) &&
+				saved.currency === (link.currency ?? null)
+		);
+		const unchanged = match < 0 ? undefined : previous.splice(match, 1)[0];
 		connection.db
 			.insert(offers)
 			.values({
-				id: randomUUID(),
+				id: unchanged?.id ?? randomUUID(),
+				...(unchanged ? { observedAt: unchanged.observedAt } : {}),
 				productId: id,
 				...link,
 				priceMinor: link.priceMinor ?? null,
 				currency: link.currency ?? null
 			})
 			.run();
+	}
 }
 /** Synchronous, current-grant checked write; callers may include this in an outer receipt transaction. */
 export function saveCapture(
@@ -329,7 +339,7 @@ export function listsGet(connection: DatabaseConnection, event: CatalogueEvent, 
 		const list = available.find((item) => item.id === id);
 		if (!list) throw new AccessError(404, 'List not found.');
 		const productIds = [
-			...new Set(visibleEntries(connection, actor, id).map((entry) => entry.productId))
+			...new Set(visibleEntries(connection, actor, { listId: id }).map((entry) => entry.productId))
 		];
 		return {
 			list,
