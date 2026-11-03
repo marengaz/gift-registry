@@ -13,10 +13,9 @@ export function createHandle(dependencies: {
 	return async ({ event, resolve }) => {
 		if (building) return resolve(event);
 		event.locals.actor = null;
+		if (event.url.pathname === '/share' && event.request.method === 'POST') return resolve(event);
 		try {
-			// The share fallback accepts a browser share, but has no authority to create records.
-			if (!(event.url.pathname === '/share' && event.request.method === 'POST'))
-				assertSameOrigin(event.request, event.url);
+			assertSameOrigin(event.request, event.url);
 			const auth = dependencies.auth();
 			if (auth) {
 				const current = await auth.api.getSession({

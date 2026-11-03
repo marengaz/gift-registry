@@ -1,5 +1,4 @@
 <script lang="ts">
-	import favicon from '#lib/assets/favicon.svg';
 	import Navigation from '#lib/components/Navigation.svelte';
 	import SyncStatus from '#lib/components/SyncStatus.svelte';
 	import '../app.css';
@@ -7,9 +6,6 @@
 	let { children }: LayoutProps = $props();
 </script>
 
-<svelte:head
-	><link rel="icon" href={favicon} /><meta name="theme-color" content="#213b43" /></svelte:head
->
 <a class="skip-link" href="#main-content">Skip to content</a>
 <Navigation />
 <SyncStatus />

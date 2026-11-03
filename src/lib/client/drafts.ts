@@ -269,7 +269,9 @@ export async function requestPersistentStorage(): Promise<
 	if (typeof navigator === 'undefined' || !navigator.storage) return 'unavailable';
 	try {
 		if (await navigator.storage.persisted()) return 'persistent';
-		return (await navigator.storage.persist?.()) ? 'persistent' : 'temporary';
+		if (!('persist' in navigator.storage) || typeof navigator.storage.persist !== 'function')
+			return 'temporary';
+		return (await navigator.storage.persist()) ? 'persistent' : 'temporary';
 	} catch {
 		return 'temporary';
 	}

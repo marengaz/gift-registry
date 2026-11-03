@@ -21,22 +21,41 @@
 	let imports = $state<LocalDraft[]>([]);
 	let draft = $state(emptyDraft());
 	let photos = $state<File[]>([]);
+	let lastRequestedDraft = $state<string | null>(null);
+	let openVersion = 0;
 	const lists = $derived(context?.lists ?? []);
 	const allowed = $derived(!context || context.administrator || lists.length > 0);
 	const savedId = $derived(current?.ack?.productId ?? '');
 	async function open(id: string) {
-		const record =
-			(context ? await draftStore.get(id, context.ownerId) : undefined) ??
-			(await draftStore.get(id, null));
-		if (!record) {
-			message = 'This draft is not available to this account. Sign in as its author.';
-			return;
+		const version = ++openVersion;
+		const ownerId = context?.ownerId;
+		try {
+			const record =
+				(ownerId ? await draftStore.get(id, ownerId) : undefined) ??
+				(await draftStore.get(id, null));
+			const files =
+				record && record.status !== 'saved' ? await draftStore.files(id, record.ownerId) : [];
+			if (version !== openVersion || ownerId !== context?.ownerId) return;
+			if (!record) {
+				message = 'This draft is not available to this account. Sign in as its author.';
+				return;
+			}
+			current = record;
+			draft = record.draft;
+			photos = files;
+			message = record.message ?? '';
+		} catch {
+			if (version === openVersion && ownerId === context?.ownerId)
+				message = 'Local storage could not open this draft. Keep this page open and try again.';
 		}
-		current = record;
-		draft = record.draft;
-		photos = record.status === 'saved' ? [] : await draftStore.files(id, record.ownerId);
-		message = record.message ?? '';
 	}
+	$effect(() => {
+		if (loading) return;
+		const requested = page.url.searchParams.get('draft');
+		if (requested === lastRequestedDraft) return;
+		lastRequestedDraft = requested;
+		if (requested) void open(requested);
+	});
 	onMount(() => {
 		const subscription = liveQuery(async () => {
 			const active = await draftStore.current();
@@ -71,6 +90,7 @@
 				}
 				context = await draftStore.current();
 				const requestedDraft = page.url.searchParams.get('draft');
+				lastRequestedDraft = requestedDraft;
 				if (requestedDraft) await open(requestedDraft);
 				else {
 					const requested = page.url.searchParams.get('list');
@@ -155,6 +175,7 @@
 		}
 	}
 	function another() {
+		openVersion++;
 		current = undefined;
 		draft = emptyDraft();
 		photos = [];
