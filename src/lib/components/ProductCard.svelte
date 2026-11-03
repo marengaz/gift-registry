@@ -40,11 +40,11 @@
 					>{/if}{:else}<span class="muted">Unlisted idea</span>{/each}
 		</div>
 		{#if product.contributorName}<p class="attribution">Added by {product.contributorName}</p>{/if}
-		{#if buying && entry}<GiftActions
-				{entry}
-				{administrator}
-				role={lists.find((list) => list.id === listId)?.role}
-				archived={!!lists.find((list) => list.id === listId)?.archivedAt}
-			/>{/if}
+		{#if buying && entry}{#key entry.id}<GiftActions
+					{entry}
+					{administrator}
+					role={lists.find((list) => list.id === listId)?.role}
+					archived={!!lists.find((list) => list.id === listId)?.archivedAt}
+				/>{/key}{/if}
 	</div>
 </article>

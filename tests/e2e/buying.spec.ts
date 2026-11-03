@@ -3,6 +3,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import Database from 'better-sqlite3';
 import { makeSignature } from 'better-auth/crypto';
 import { fixture } from '../integration/identity-fixture';
 import { acceptInvitation, createInvitation } from '../../src/lib/server/invitations';
@@ -136,5 +137,40 @@ test('relatives reserve and purchase their own gifts, while administrator assign
 		await buyer.close();
 		await viewer.close();
 		await admin.close();
+	}
+});
+
+test('keeps buying state separate when following another list membership', async ({ browser }) => {
+	const db = new Database(join(directory, 'test.sqlite'));
+	try {
+		db.exec(
+			"INSERT INTO lists(id,recipient_id,name,occasion) VALUES('cross-list-first','child','First scope','Cross first'),('cross-list-second','child','Second scope','Cross second'); INSERT INTO products(id,title,contributor_id) VALUES('cross-product','Cross-list game','admin'); INSERT INTO entries(id,product_id,list_id,estimate_pence,actual_pence,state,buyer_id,allocation_source,allocated_by_id,allocated_at,purchased_at,version) VALUES('cross-visible','cross-product','cross-list-first',2000,1750,'purchased','admin','administrator','admin',1,1,1); INSERT INTO entries(id,product_id,list_id,estimate_pence) VALUES('cross-secret','cross-product','cross-list-second',2000)"
+		);
+	} finally {
+		db.close();
+	}
+	const context = await browser.newContext({ extraHTTPHeaders: { 'x-forwarded-proto': 'http' } });
+	try {
+		await signIn(context, 'admin');
+		const page = await context.newPage();
+		await page.goto(origin + '/lists/cross-list-first');
+		const game = page
+			.getByRole('article')
+			.filter({ has: page.getByRole('heading', { name: 'Cross-list game', exact: true }) });
+		await expect(game.getByText(/Purchased/)).toBeVisible();
+		await game.getByRole('link', { name: 'Child · Second scope', exact: true }).click();
+		await expect(page).toHaveURL(origin + '/lists/cross-list-second');
+		await expect(game.getByRole('button', { name: 'Reserve for me', exact: true })).toBeEnabled();
+		await expect(game.getByText(/Purchased/)).toHaveCount(0);
+		await game.getByRole('button', { name: 'Reserve for me', exact: true }).click();
+		await expect(game.getByText(/Reserved/)).toBeVisible();
+		const original = await context.request.get(origin + '/api/entries/cross-visible/allocation');
+		expect((await original.json()).entry).toMatchObject({
+			state: 'purchased',
+			actualPence: 1750,
+			buyerId: 'admin'
+		});
+	} finally {
+		await context.close();
 	}
 });
