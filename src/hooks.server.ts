@@ -13,6 +13,11 @@ export function createHandle(dependencies: {
 	return async ({ event, resolve }) => {
 		if (building) return resolve(event);
 		event.locals.actor = null;
+		if (
+			event.request.method === 'GET' &&
+			['/health/live', '/health/ready'].includes(event.url.pathname)
+		)
+			return resolve(event);
 		if (event.url.pathname === '/share' && event.request.method === 'POST') return resolve(event);
 		try {
 			assertSameOrigin(event.request, event.url);

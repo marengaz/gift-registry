@@ -38,6 +38,9 @@
 					><a
 						class:active={page.url.pathname === '/settings/identification'}
 						href="/settings/identification">Identification</a
+					><a
+						class:active={page.url.pathname === '/settings/diagnostics'}
+						href="/settings/diagnostics">Server checks</a
 					>{/if}
 			</nav>
 			<div class="account"><span>{person.name}</span><SignOut /></div>{:else}<a

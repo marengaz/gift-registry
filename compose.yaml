@@ -1,0 +1,78 @@
+name: family-gifts
+services:
+  app:
+    build: .
+    image: family-gifts:local
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 3000
+      BODY_SIZE_LIMIT: 64M
+      PROTOCOL_HEADER: x-forwarded-proto
+      DATABASE_PATH: /data/gifts.sqlite
+      MEDIA_PATH: /data/media
+      ORIGIN: ${ORIGIN:?Set the public HTTPS origin in .env}
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?Set a random secret in .env}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:?Set the Google web client ID in .env}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:?Set the Google client secret in .env}
+      ADMINISTRATOR_EMAIL: ${ADMINISTRATOR_EMAIL:-}
+      ADMINISTRATOR_GOOGLE_SUBJECT: ${ADMINISTRATOR_GOOGLE_SUBJECT:-}
+      VISION_PROJECT_ID: ${VISION_PROJECT_ID:-}
+      VISION_CREDENTIALS_FILE: ${VISION_CREDENTIALS_FILE:-}
+    volumes:
+      - gifts_data:/data
+    healthcheck:
+      test:
+        [
+          CMD,
+          node,
+          -e,
+          "fetch('http://127.0.0.1:3000/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+        ]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+    stop_grace_period: 40s
+  worker:
+    image: family-gifts:local
+    command: [node, build-worker/worker.js]
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      DATABASE_PATH: /data/gifts.sqlite
+      MEDIA_PATH: /data/media
+      VISION_PROJECT_ID: ${VISION_PROJECT_ID:-}
+      VISION_CREDENTIALS_FILE: ${VISION_CREDENTIALS_FILE:-}
+    volumes:
+      - gifts_data:/data
+      - type: bind
+        source: ${VISION_CREDENTIALS_DIRECTORY:-./secrets}
+        target: /run/secrets
+        read_only: true
+    stop_grace_period: 120s
+  caddy:
+    image: caddy:2.11.7-alpine
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_healthy
+    environment:
+      PUBLIC_HOSTNAME: ${PUBLIC_HOSTNAME:?Set the public hostname in .env}
+      ACME_EMAIL: ${ACME_EMAIL:?Set the certificate contact email in .env}
+    ports:
+      - '80:80'
+      - '443:443'
+      - '443:443/udp'
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+volumes:
+  gifts_data:
+  caddy_data:
+  caddy_config:

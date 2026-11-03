@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite';
 export default defineConfig({
+	ssr: { noExternal: ['@sveltejs/kit'] },
 	build: {
 		ssr: 'src/worker.ts',
 		outDir: 'build-worker',
