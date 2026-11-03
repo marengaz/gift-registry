@@ -211,3 +211,75 @@ test('recovers a lost response after reauthentication without exposing or upload
 		await context.close();
 	}
 });
+
+test('retains a new offline draft if sign-out takes longer than its local lease', async ({
+	browser
+}) => {
+	const context = await browser.newContext({ extraHTTPHeaders: { 'x-forwarded-proto': 'http' } });
+	await signIn(context, 'guest');
+	const signingOut = await context.newPage();
+	const capturing = await context.newPage();
+	let release!: () => void;
+	try {
+		await capturing.clock.install();
+		await signingOut.goto(origin + '/capture');
+		await capturing.goto(origin + '/capture');
+		await expect(capturing.getByLabel('Title', { exact: true })).toBeVisible();
+		let started!: () => void;
+		const received = new Promise<void>((resolve) => {
+			started = resolve;
+		});
+		const held = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		await context.route('**/api/auth/sign-out', async (route) => {
+			const response = await route.fetch();
+			started();
+			await held;
+			await route.fulfill({ response });
+		});
+		await signingOut.getByRole('button', { name: 'Sign out', exact: true }).click();
+		await received;
+		await context.setOffline(true);
+		await capturing.clock.fastForward(61_000);
+		await capturing.getByLabel('Title', { exact: true }).fill('Captured during slow sign-out');
+		await capturing.getByRole('button', { name: 'Save on this device', exact: true }).click();
+		await expect(
+			capturing.getByRole('heading', { name: 'Saved on this device', exact: true })
+		).toBeVisible();
+		const record = (await localRecords(capturing))[0];
+		expect(record.ownerId).toBe('guest');
+		release();
+		await expect
+			.poll(() =>
+				capturing.evaluate(async () => {
+					const db = await new Promise<IDBDatabase>((resolve, reject) => {
+						const request = indexedDB.open('family-gift-captures');
+						request.onsuccess = () => resolve(request.result);
+						request.onerror = () => reject(request.error);
+					});
+					try {
+						return await new Promise<boolean>((resolve, reject) => {
+							const request = db.transaction('context').objectStore('context').get('active');
+							request.onsuccess = () => resolve(!request.result);
+							request.onerror = () => reject(request.error);
+						});
+					} finally {
+						db.close();
+					}
+				})
+			)
+			.toBe(true);
+		expect(await localRecords(capturing)).toContainEqual(
+			expect.objectContaining({
+				id: record.id,
+				ownerId: 'guest',
+				operationId: record.operationId,
+				status: 'local'
+			})
+		);
+	} finally {
+		release?.();
+		await context.close();
+	}
+});

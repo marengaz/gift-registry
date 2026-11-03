@@ -47,7 +47,11 @@
 			if (ownerId) await draftStore.endSignOut(ownerId);
 			throw error;
 		}
-		if (ownerId) await draftStore.discard(ownerId);
+		if (ownerId) {
+			for (const record of await draftStore.list(ownerId)) {
+				if (record.status === 'saved') await draftStore.discard(ownerId, record.id);
+			}
+		}
 		const context = await draftStore.current();
 		if (context?.ownerId === ownerId) await draftStore.remember(null);
 		window.location.assign('/login');
