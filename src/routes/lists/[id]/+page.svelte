@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { invalidateAll } from '$app/navigation';
+	import ListTotals from '#lib/components/ListTotals.svelte';
 	import ProductCard from '#lib/components/ProductCard.svelte';
 	import type { GiftList, Product } from '#lib/catalogue-types.ts';
 	import type { PageProps } from './$types';
@@ -50,12 +51,15 @@
 			This list is archived. Its history is kept here; relatives cannot browse it or add ideas.
 		</p>{/if}
 	{#if message}<p class="notice error" role="alert">{message}</p>{/if}
+	{#if data.totals}<ListTotals totals={data.totals} />{/if}
 	{#if data.products.length}<div class="section-heading"><h2>Ideas on this list</h2></div>
 		<div class="product-grid">
 			{#each data.products as product}<ProductCard
 					product={product as Product}
 					lists={data.lists}
 					listId={list.id}
+					buying
+					administrator={data.administrator}
 				/>{/each}
 		</div>{:else}<section class="empty-state">
 			<div class="empty-symbol" aria-hidden="true">✧</div>

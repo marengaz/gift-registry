@@ -1,7 +1,19 @@
 <script lang="ts">
+	import GiftActions from './GiftActions.svelte';
 	import { money, type Product, type GiftList } from '#lib/catalogue-types.ts';
-	let { product, lists, listId }: { product: Product; lists: GiftList[]; listId?: string } =
-		$props();
+	let {
+		product,
+		lists,
+		listId,
+		buying = false,
+		administrator = false
+	}: {
+		product: Product;
+		lists: GiftList[];
+		listId?: string;
+		buying?: boolean;
+		administrator?: boolean;
+	} = $props();
 	const entry = $derived(product.entries.find((e) => e.listId === listId));
 </script>
 
@@ -28,5 +40,11 @@
 					>{/if}{:else}<span class="muted">Unlisted idea</span>{/each}
 		</div>
 		{#if product.contributorName}<p class="attribution">Added by {product.contributorName}</p>{/if}
+		{#if buying && entry}<GiftActions
+				{entry}
+				{administrator}
+				role={lists.find((list) => list.id === listId)?.role}
+				archived={!!lists.find((list) => list.id === listId)?.archivedAt}
+			/>{/if}
 	</div>
 </article>

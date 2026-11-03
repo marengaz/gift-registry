@@ -118,3 +118,19 @@ export const money = (value: number | null | undefined) =>
 	value == null
 		? 'Price unknown'
 		: new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP' }).format(value / 100);
+
+export type GiftEntry = Product['entries'][number];
+export type AssignmentMember = {
+	id: string;
+	name: string;
+	email: string;
+	role: 'contributor' | 'buyer' | 'viewer';
+};
+
+export type AllocationRecord = {
+	action: string;
+	createdAt: number;
+	fromState: string;
+	toState: string;
+	resultingVersion: number;
+};

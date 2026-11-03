@@ -23,6 +23,7 @@
 		<a class="brand" href="/lists"><span aria-hidden="true">✦</span> Family gifts</a>
 		{#if person?.member}<nav aria-label="Main navigation">
 				<a class:active={page.url.pathname.startsWith('/lists')} href="/lists">Lists</a>
+				<a class:active={page.url.pathname === '/my-gifts'} href="/my-gifts">My gifts</a>
 				{#if person.administrator}<a
 						class:active={page.url.pathname === '/catalogue'}
 						href="/catalogue">Catalogue</a
