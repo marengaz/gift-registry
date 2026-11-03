@@ -44,7 +44,6 @@ export function authSetup(environment: AuthEnvironment = authEnvironment()) {
 		missing.push('ADMINISTRATOR_EMAIL or ADMINISTRATOR_GOOGLE_SUBJECT');
 	return { ready: missing.length === 0, missing };
 }
-/** The factory keeps provider configuration and the database lazy during build and setup. */
 export function createAuth(connection: DatabaseConnection, environment: AuthEnvironment) {
 	if (!authSetup(environment).ready) throw new Error('Google sign-in is not configured.');
 	return betterAuth({

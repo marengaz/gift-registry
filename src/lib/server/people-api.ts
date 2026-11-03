@@ -11,8 +11,7 @@ import {
 	peopleSettings,
 	revokeInvitation,
 	revokeMember,
-	setGrant,
-	type ListGrant
+	setGrant
 } from './invitations';
 import { apiResponse, assertSameOrigin } from './http';
 import { z } from 'zod';
@@ -25,8 +24,8 @@ const operation = z.discriminatedUnion('action', [
 	z.object({
 		action: z.literal('grant'),
 		userId: z.string().min(1),
-		listId: z.string().min(1),
-		role: z.enum(['contributor', 'buyer', 'viewer']).nullable()
+		listId: grant.shape.listId,
+		role: grant.shape.role.nullable()
 	}),
 	z.object({ action: z.literal('revokeMember'), userId: z.string().min(1) }),
 	z.object({ action: z.literal('revokeInvitation'), id: z.string().min(1) })
@@ -49,7 +48,7 @@ export function peoplePost(connection: DatabaseConnection, event: PeopleEvent) {
 		if (input.action === 'invite') {
 			const result = createInvitation(connection, actor, {
 				email: input.email,
-				grants: input.grants as ListGrant[]
+				grants: input.grants
 			});
 			return {
 				id: result.id,
