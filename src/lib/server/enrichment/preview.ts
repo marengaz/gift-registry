@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { AccessError, canCapture, requireMember } from '../access';
 import type { CatalogueEvent } from '../catalogue';
 import type { DatabaseConnection } from '../db/client';
-import { apiResponse, assertSameOrigin, privateJson } from '../http';
+import { apiResponse, assertSameOrigin } from '../http';
 import { MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS } from '../media';
 import { publicFetch } from './fetch';
 import { extractMetadata } from './metadata';

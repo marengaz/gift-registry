@@ -6,6 +6,7 @@ import type { CatalogueEvent } from './catalogue';
 import { requireAdministrator } from './access';
 import { authSetup } from './auth';
 import { apiResponse } from './http';
+import { visionConfiguration } from './enrichment/vision';
 export type ReadinessOptions = {
 	database: () => DatabaseConnection;
 	mediaPath: string;
@@ -76,8 +77,7 @@ export function diagnosticsGet(
 				originMatches: event.url.origin === environment.ORIGIN,
 				forwardedProtocolConfigured: environment.PROTOCOL_HEADER === 'x-forwarded-proto'
 			},
-			identificationConfigured:
-				!!environment.VISION_PROJECT_ID && !!environment.VISION_CREDENTIALS_FILE,
+			identificationConfigured: visionConfiguration(environment).ready,
 			jobs
 		};
 	});

@@ -18,7 +18,13 @@ import type { DatabaseConnection } from '../db/client';
 import { lookupJobs } from '../db/enrichment-schema';
 import { products, media, offers } from '../db/schema';
 import { apiResponse, assertSameOrigin } from '../http';
-import { mediaRoot, prepareMedia, MAX_IMAGE_PIXELS, type MediaOptions } from '../media';
+import {
+	mediaRoot,
+	prepareMedia,
+	MAX_IMAGE_PIXELS,
+	MAX_IMAGE_BYTES,
+	type MediaOptions
+} from '../media';
 import { allowanceSummary, reserveAllowance } from './allowance';
 import { publicFetch } from './fetch';
 import { extractMetadata } from './metadata';
@@ -222,7 +228,7 @@ async function sourceImage(
 		throw new Error(
 			'This post has no accessible product image. Add a screenshot or a shop photo, or enter the details manually.'
 		);
-	const image = await fetchPage(url, { maxBytes: 12 * 1024 * 1024 });
+	const image = await fetchPage(url, { maxBytes: MAX_IMAGE_BYTES });
 	return image.body;
 }
 export async function runNextJob(
@@ -411,7 +417,7 @@ export function confirmSuggestion(
 					.get()
 			) {
 				const response = await (options.fetchPage ?? publicFetch)(suggestion.imageUrl, {
-					maxBytes: 12 * 1024 * 1024
+					maxBytes: MAX_IMAGE_BYTES
 				});
 				prepared = await prepareMedia(
 					[new File([new Uint8Array(response.body)], filename)],

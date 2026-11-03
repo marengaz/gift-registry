@@ -60,9 +60,7 @@ export function extractMetadata(
 	$('script[type="application/ld+json"]').each((_, script) => {
 		try {
 			walk(JSON.parse($(script).text()));
-		} catch {
-			/* Other page evidence remains usable. */
-		}
+		} catch {}
 	});
 	const suggestions = found.slice(0, 8).map((node) => {
 		const uncertainty: string[] = [];
