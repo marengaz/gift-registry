@@ -44,10 +44,7 @@ export function draftFromProduct(product: Product): CaptureDraft {
 		listIds: product.entries.map((e) => e.listId),
 		estimate: '',
 		entryEstimates: Object.fromEntries(
-			product.entries.map((e) => [
-				e.listId,
-				e.estimatePence == null ? '' : (e.estimatePence / 100).toFixed(2)
-			])
+			product.entries.map((e) => [e.listId, priceInput(e.estimatePence, 'GBP')])
 		),
 		labels: product.labels.map((l) => l.name).join(', '),
 		offers: product.offers.map((o) => ({
@@ -115,9 +112,7 @@ export function capturePayload(draft: CaptureDraft) {
 	};
 }
 export const money = (value: number | null | undefined) =>
-	value == null
-		? 'Price unknown'
-		: new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP' }).format(value / 100);
+	value == null ? 'Price unknown' : formatPrice(value, 'GBP');
 
 export type GiftEntry = Product['entries'][number];
 export type AssignmentMember = {

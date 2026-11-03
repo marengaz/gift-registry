@@ -41,7 +41,6 @@ export type CaptureContext = {
 };
 const ownerKey = (ownerId: string | null) => ownerId ?? ':unbound';
 const copy = <T>(value: T): T => JSON.parse(JSON.stringify(value));
-/** Capture data only: no session tokens, buying state or catalogue replication. */
 export class DraftStore extends Dexie {
 	drafts!: Table<LocalDraft, string>;
 	blobs!: Table<StoredBlob, [string, number]>;

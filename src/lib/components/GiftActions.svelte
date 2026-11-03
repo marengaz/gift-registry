@@ -31,6 +31,13 @@
 	let actual = $state('');
 	let pending = $state<Record<string, unknown> | null>(null);
 	const gift = $derived(current ?? entry);
+	const availabilityLabel = $derived.by(() => {
+		if (!fresh) return 'Availability needs an online refresh';
+		if (gift.state === 'available') return 'Available';
+		if (gift.state === 'purchased') return 'Purchased';
+		if (gift.allocationSource === 'administrator') return 'Assigned';
+		return 'Reserved';
+	});
 	const mayBuy = $derived(administrator || role === 'buyer' || role === 'contributor');
 	const enabled = $derived(fresh && online && !busy && !pending && !navigating.to);
 	async function refresh() {
@@ -127,15 +134,7 @@
 
 <div class="gift-actions">
 	<p class="gift-state">
-		{!fresh
-			? 'Availability needs an online refresh'
-			: gift.state === 'available'
-				? 'Available'
-				: gift.state === 'purchased'
-					? 'Purchased'
-					: gift.allocationSource === 'administrator'
-						? 'Assigned'
-						: 'Reserved'}{#if administrator && gift.buyerId}
+		{availabilityLabel}{#if administrator && gift.buyerId}
 			{' · '}{members.find((person) => person.id === gift.buyerId)?.name ?? 'Existing buyer'}{/if}
 	</p>
 	{#if gift.state === 'purchased'}<p class="value">

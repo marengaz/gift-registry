@@ -3,7 +3,7 @@ import { AccessError, requireMember } from './access';
 import { parseCapture, saveCapture, type CatalogueEvent } from './catalogue';
 import type { DatabaseConnection } from './db/client';
 import { assertSameOrigin, privateJson } from './http';
-import { prepareMedia, type MediaOptions } from './media';
+import { MAX_IMAGE_BYTES, prepareMedia, type MediaOptions } from './media';
 import type { CaptureAcknowledgement } from '../shared/capture';
 function canonical(value: unknown): string {
 	if (Array.isArray(value)) return '[' + value.map(canonical).join(',') + ']';
@@ -54,7 +54,7 @@ export async function capturesPost(
 			: [];
 		const fingerprint = createHash('sha256').update(canonical(input));
 		for (const file of files) {
-			if (file.size > 12 * 1024 * 1024)
+			if (file.size > MAX_IMAGE_BYTES)
 				throw new AccessError(413, 'Each photo must be 12 MB or smaller.');
 			fingerprint.update(canonical({ name: file.name, type: file.type, size: file.size }));
 			fingerprint.update(
@@ -113,7 +113,6 @@ export async function capturesPost(
 			.immediate();
 		return privateJson(result);
 	} catch (error) {
-		// The receipt and product share the transaction; a failed commit keeps neither.
 		committed = false;
 		if (operation && error instanceof AccessError && [400, 413].includes(error.status)) {
 			try {

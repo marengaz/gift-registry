@@ -3,7 +3,7 @@
 	import { liveQuery } from 'dexie';
 	import { page } from '$app/state';
 	import CaptureEditor from '#lib/components/CaptureEditor.svelte';
-	import { emptyDraft, type Identity } from '#lib/catalogue-types.ts';
+	import { emptyDraft } from '#lib/catalogue-types.ts';
 	import {
 		draftStore,
 		requestPersistentStorage,
@@ -11,7 +11,6 @@
 		type LocalDraft
 	} from '#lib/client/drafts.ts';
 	import { refreshCaptureIdentity, syncDrafts } from '#lib/client/sync.ts';
-	let person = $state<Identity | null>(null);
 	let context = $state<CaptureContext | undefined>();
 	let loading = $state(true);
 	let busy = $state(false);
@@ -66,7 +65,7 @@
 		void (async () => {
 			try {
 				try {
-					person = await refreshCaptureIdentity();
+					await refreshCaptureIdentity();
 				} catch {
 					message = 'You are offline. Save an idea on this device and synchronise when connected.';
 				}
@@ -140,7 +139,7 @@
 		if (busy || !current || current.ownerId) return;
 		busy = true;
 		try {
-			person = await refreshCaptureIdentity();
+			const person = await refreshCaptureIdentity();
 			if (!person) throw new Error('Sign in before adopting this draft.');
 			current = await draftStore.adopt(current.id, person);
 			context = await draftStore.current();

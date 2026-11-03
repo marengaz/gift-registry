@@ -26,7 +26,6 @@
 			if (pending) choosing = true;
 			else await finish();
 		} catch {
-			// Offline sign-out still uses only the previously initialised account's drafts.
 			const context = await draftStore.current();
 			ownerId = context?.ownerId ?? '';
 			pending = ownerId
@@ -68,7 +67,6 @@
 						'Some ideas still need attention. Review your drafts or choose to discard them before signing out.'
 					);
 			} else {
-				// Discard is explicit; refuse while a persisted upload lease is active.
 				await draftStore.discard(ownerId);
 			}
 			await finish();
