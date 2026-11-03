@@ -73,18 +73,35 @@ self.addEventListener('fetch', (event) => {
 	if (event.request.mode === 'navigate') {
 		event.respondWith(
 			(async () => {
+				const controller = url.pathname === '/capture' ? new AbortController() : undefined;
+				const timer = controller ? setTimeout(() => controller.abort(), 5_000) : undefined;
 				try {
-					return await fetch(event.request);
+					const response = await fetch(event.request, { signal: controller?.signal });
+					if (url.pathname !== '/capture' || (!response.ok && response.status < 500))
+						return response;
+					if (response.ok) {
+						const body = response.body ? await response.arrayBuffer() : null;
+						const headers = new Headers(response.headers);
+						headers.delete('content-encoding');
+						headers.delete('content-length');
+						return new Response(body, {
+							status: response.status,
+							statusText: response.statusText,
+							headers
+						});
+					}
 				} catch {
 					if (url.pathname !== '/capture') return Response.redirect(captureUrl, 303);
-					return (
-						(await (await caches.open(cacheName)).match(captureUrl)) ??
-						shareRecoveryResponse(
-							'The offline capture screen is not ready. Reconnect and open Add an idea first.',
-							503
-						)
-					);
+				} finally {
+					clearTimeout(timer);
 				}
+				return (
+					(await (await caches.open(cacheName)).match(captureUrl)) ??
+					shareRecoveryResponse(
+						'The offline capture screen is not ready. Reconnect and open Add an idea first.',
+						503
+					)
+				);
 			})()
 		);
 	}

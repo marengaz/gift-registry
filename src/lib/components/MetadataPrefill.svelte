@@ -12,6 +12,8 @@
 	let attempted = '';
 	async function retrieve(url: string) {
 		if (busy || disabled || !navigator.onLine) return;
+		const requestedDraft = draft;
+		const current = () => !disabled && draft === requestedDraft && draft.sourceUrl === url;
 		busy = true;
 		message = 'Looking for retailer details…';
 		try {
@@ -22,7 +24,7 @@
 			});
 			const result = await response.json();
 			if (!response.ok) throw new Error(result.message);
-			if (disabled || draft.sourceUrl !== url) return;
+			if (!current()) return;
 			const candidate: ProductSuggestion | undefined = result.suggestions[0];
 			if (!candidate) {
 				message = result.message;
@@ -60,15 +62,20 @@
 				...candidate.uncertainty
 			].join(' ');
 			if (candidate.imageUrl && !photos.length) {
+				const selectedPhotos = photos;
 				const image = await fetch('/api/metadata/image', {
 					method: 'POST',
 					headers: { 'content-type': 'application/json' },
 					body: JSON.stringify({ url: candidate.imageUrl })
 				});
-				if (image.ok && !disabled && draft.sourceUrl === url && !photos.length)
-					photos = [new File([await image.blob()], 'retailer-image.webp', { type: 'image/webp' })];
+				if (image.ok) {
+					const blob = await image.blob();
+					if (current() && photos === selectedPhotos && !photos.length)
+						photos = [new File([blob], 'retailer-image.webp', { type: 'image/webp' })];
+				}
 			}
 		} catch (error) {
+			if (!current()) return;
 			message =
 				error instanceof Error
 					? error.message
