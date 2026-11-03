@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { invalidateAll } from '$app/navigation';
 	import CaptureEditor from '#lib/components/CaptureEditor.svelte';
+	import ProductSuggestions from '#lib/components/ProductSuggestions.svelte';
 	import {
 		draftFromProduct,
 		emptyDraft,
@@ -133,6 +134,7 @@
 								</li>{/each}
 						</ul>
 					</section>{/if}
+				<ProductSuggestions {product} administrator={data.administrator} />
 				{#if product.sourceUrl || product.sourceText}<section class="panel">
 						<h2>Original source</h2>
 						{#if product.sourceUrl}<p>

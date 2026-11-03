@@ -1,4 +1,5 @@
 <script lang="ts">
+	import MetadataPrefill from './MetadataPrefill.svelte';
 	import type { CaptureDraft, GiftList } from '#lib/catalogue-types.ts';
 	let {
 		draft = $bindable(),
@@ -86,6 +87,7 @@
 					placeholder="https://…"
 				/></label
 			>
+			{#if !editing}<MetadataPrefill bind:draft bind:photos disabled={locked || busy} />{/if}
 			<label
 				>Original text or notes <textarea
 					rows="3"

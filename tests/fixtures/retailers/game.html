@@ -1,0 +1,29 @@
+<!doctype html>
+<html>
+	<head>
+		<title>Fallback shop title</title>
+		<meta property="og:image" content="/fallback.jpg" />
+		<script type="application/ld+json">
+			{
+				"@context": "https://schema.org",
+				"@graph": [
+					{
+						"@type": "Product",
+						"name": "Woodland game",
+						"description": "A &amp; B",
+						"color": "Green",
+						"size": "Travel",
+						"image": ["/game.jpg"],
+						"offers": {
+							"@type": "Offer",
+							"price": "24.50",
+							"priceCurrency": "GBP",
+							"url": "/buy",
+							"seller": { "name": "Toy shop" }
+						}
+					}
+				]
+			}
+		</script>
+	</head>
+</html>

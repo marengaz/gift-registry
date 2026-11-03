@@ -35,6 +35,9 @@
 				{#if person.administrator}<a
 						class:active={page.url.pathname === '/settings/people'}
 						href="/settings/people">People</a
+					><a
+						class:active={page.url.pathname === '/settings/identification'}
+						href="/settings/identification">Identification</a
 					>{/if}
 			</nav>
 			<div class="account"><span>{person.name}</span><SignOut /></div>{:else}<a

@@ -213,3 +213,5 @@ export const captureReceipts = sqliteTable(
 	},
 	(table) => [primaryKey({ columns: [table.actorId, table.operationId] })]
 );
+
+export { identificationSettings, lookupJobs, allowanceReservations } from './enrichment-schema';
