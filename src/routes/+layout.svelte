@@ -1,12 +1,15 @@
 <script lang="ts">
 	import favicon from '#lib/assets/favicon.svg';
+	import Navigation from '#lib/components/Navigation.svelte';
+	import '../app.css';
 	import type { LayoutProps } from './$types';
-
 	let { children }: LayoutProps = $props();
 </script>
 
-<svelte:head>
-	<link rel="icon" href={favicon} />
-</svelte:head>
-
-{@render children()}
+<svelte:head
+	><link rel="icon" href={favicon} /><meta name="theme-color" content="#213b43" /></svelte:head
+>
+<a class="skip-link" href="#main-content">Skip to content</a>
+<Navigation />
+<div id="main-content" tabindex="-1">{@render children()}</div>
+<footer class="site-footer">A little inspiration, all in one place.</footer>
