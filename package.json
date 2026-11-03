@@ -24,6 +24,7 @@
 		"@types/better-sqlite3": "9.6.0",
 		"@types/node": "26.6.6",
 		"drizzle-kit": "0.31.11",
+		"fake-indexeddb": "6.2.7",
 		"prettier": "3.9.10",
 		"prettier-plugin-svelte": "4.1.1",
 		"svelte": "5.57.3",
