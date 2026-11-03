@@ -102,6 +102,7 @@ export async function mediaGet(
 		} catch {
 			throw new AccessError(404, 'Image not found.');
 		}
+		requireMediaAccess(connection, actor, id);
 		response = new Response(new Uint8Array(bytes), {
 			headers: {
 				'Content-Type': download ? 'application/octet-stream' : 'image/webp',
