@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { page } from '$app/state';
 	import { liveQuery } from 'dexie';
 	import { draftStore, type CaptureContext, type LocalDraft } from '#lib/client/drafts.ts';
 	import { syncDrafts } from '#lib/client/sync.ts';
@@ -57,7 +58,7 @@
 		});
 		const online = () => {
 			offline = !navigator.onLine;
-			if (!offline) void retry();
+			if (!offline && page.url.pathname !== '/capture') void retry();
 			else ready = true;
 		};
 		window.addEventListener('online', online);

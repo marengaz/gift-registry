@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { authClient } from '#lib/client/auth.ts';
+	import { prepareOpenCapture } from '#lib/client/capture-session.ts';
 	import { draftStore } from '#lib/client/drafts.ts';
 	import { refreshCaptureIdentity, syncDrafts } from '#lib/client/sync.ts';
 	let busy = $state(false);
@@ -8,6 +9,19 @@
 	let pending = $state(0);
 	let error = $state('');
 	let online = $state(true);
+	let resumeCapture: (() => Promise<void>) | undefined;
+	let completed = false;
+	async function resume() {
+		const callback = resumeCapture;
+		resumeCapture = undefined;
+		if (callback) await callback();
+	}
+	async function cancel() {
+		choosing = false;
+		error = '';
+		if (ownerId) await draftStore.endSignOut(ownerId);
+		await resume();
+	}
 	function showChoice(dialog: HTMLDialogElement) {
 		dialog.showModal();
 	}
@@ -15,6 +29,16 @@
 		if (busy) return;
 		busy = true;
 		error = '';
+		try {
+			resumeCapture = await prepareOpenCapture();
+		} catch (reason) {
+			error =
+				reason instanceof Error
+					? reason.message
+					: 'The unfinished idea could not be saved. Keep this page open before signing out.';
+			busy = false;
+			return;
+		}
 		try {
 			const person = await refreshCaptureIdentity();
 			const context = await draftStore.current();
@@ -36,6 +60,7 @@
 			else error = 'Reconnect before signing out. Your drafts are still on this device.';
 		} finally {
 			busy = false;
+			if (!choosing && !completed) await resume();
 		}
 	}
 	async function finish() {
@@ -52,8 +77,8 @@
 				if (record.status === 'saved') await draftStore.discard(ownerId, record.id);
 			}
 		}
-		const context = await draftStore.current();
-		if (context?.ownerId === ownerId) await draftStore.remember(null);
+		if (ownerId) await draftStore.forgetOwner(ownerId);
+		completed = true;
 		window.location.assign('/login');
 	}
 	async function choose(sync: boolean) {
@@ -93,9 +118,7 @@
 		oncancel={(event) => {
 			event.preventDefault();
 			if (!busy) {
-				choosing = false;
-				error = '';
-				if (ownerId) void draftStore.endSignOut(ownerId);
+				void cancel();
 			}
 		}}
 		aria-labelledby="signout-title"
@@ -115,9 +138,7 @@
 				class="quiet"
 				disabled={busy}
 				onclick={() => {
-					choosing = false;
-					error = '';
-					if (ownerId) void draftStore.endSignOut(ownerId);
+					void cancel();
 				}}>Cancel</button
 			>
 		</div>

@@ -9,7 +9,8 @@
 		editing = false,
 		locked = false,
 		localCapture = false,
-		onSave
+		onSave,
+		onListsChanged
 	}: {
 		draft: CaptureDraft;
 		photos?: File[];
@@ -19,6 +20,7 @@
 		locked?: boolean;
 		localCapture?: boolean;
 		onSave: () => void;
+		onListsChanged?: () => void;
 	} = $props();
 	let photoError = $state('');
 	function selected(event: Event) {
@@ -166,7 +168,12 @@
 					class="list-choice"
 				>
 					<label class="check-label"
-						><input type="checkbox" value={list.id} bind:group={draft.listIds} /><span
+						><input
+							type="checkbox"
+							value={list.id}
+							bind:group={draft.listIds}
+							onchange={onListsChanged}
+						/><span
 							><strong>{list.recipientName}</strong> · {list.name}{#if list.archivedAt}<span
 									class="badge">Archived</span
 								>{/if}<small>{list.occasion ?? 'General ideas'}</small></span

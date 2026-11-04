@@ -26,13 +26,12 @@ test.beforeAll(async () => {
 	);
 	await context.connection.sqlite.backup(join(directory, 'test.sqlite'));
 	context.connection.close();
-	server = spawn(process.execPath, ['build/index.js'], {
+	server = spawn(process.execPath, ['scripts/start.mjs'], {
 		cwd: process.cwd(),
 		env: {
 			...process.env,
 			HOST: '127.0.0.1',
 			PORT: '4187',
-			BODY_SIZE_LIMIT: '64M',
 			PROTOCOL_HEADER: 'x-forwarded-proto',
 			ORIGIN: origin,
 			DATABASE_PATH: join(directory, 'test.sqlite'),

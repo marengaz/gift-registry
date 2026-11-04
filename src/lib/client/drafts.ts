@@ -22,6 +22,7 @@ export type LocalDraft = {
 	leaseToken?: string;
 	message?: string;
 	ack?: CaptureAcknowledgement;
+	editorToken?: string;
 };
 type StoredBlob = {
 	draftId: string;
@@ -39,12 +40,15 @@ export type CaptureContext = {
 	lists: GiftList[];
 	logoutUntil?: number;
 };
+const browserLocks = () => (typeof navigator === 'undefined' ? undefined : navigator.locks);
+const editorKey = (database: string, id: string) => `gift-editor:${database}:${id}`;
 const ownerKey = (ownerId: string | null) => ownerId ?? ':unbound';
 const copy = <T>(value: T): T => JSON.parse(JSON.stringify(value));
 export class DraftStore extends Dexie {
 	drafts!: Table<LocalDraft, string>;
 	blobs!: Table<StoredBlob, [string, number]>;
 	context!: Table<CaptureContext, string>;
+	identity!: Table<{ id: string; generation: number }, string>;
 	constructor(name = 'family-gift-captures') {
 		super(name);
 		this.version(1).stores({
@@ -68,14 +72,31 @@ export class DraftStore extends Dexie {
 						record.createdAt ??= record.updatedAt ?? Date.now();
 					});
 			});
+		this.version(3).stores({
+			drafts: 'id,ownerKey,status,updatedAt',
+			blobs: '[draftId+position],draftId',
+			context: 'id',
+			identity: 'id'
+		});
 	}
-	async save(input: { id?: string; ownerId: string | null; draft: CaptureDraft; photos: File[] }) {
+	async save(input: {
+		id?: string;
+		ownerId: string | null;
+		draft: CaptureDraft;
+		photos: File[];
+		editorToken?: string;
+		preserve?: boolean;
+	}) {
 		// Svelte's reactive values are copied before entering IndexedDB structured cloning.
 		const draft = copy(input.draft);
 		const now = Date.now();
 		return this.transaction('rw', this.drafts, this.blobs, this.context, async () => {
 			const active = await this.current();
-			if (active?.ownerId === input.ownerId && (active.logoutUntil ?? 0) > Date.now())
+			if (
+				!input.preserve &&
+				active?.ownerId === input.ownerId &&
+				(active.logoutUntil ?? 0) > Date.now()
+			)
 				throw new Error('Sign-out is in progress. Cancel it before saving another draft.');
 			const previous = input.id ? await this.drafts.get(input.id) : undefined;
 			if (input.id && (!previous || previous.ownerId !== input.ownerId))
@@ -92,7 +113,8 @@ export class DraftStore extends Dexie {
 				draft,
 				status: 'local',
 				createdAt: previous?.createdAt ?? now,
-				updatedAt: now
+				updatedAt: now,
+				editorToken: input.editorToken
 			};
 			await this.drafts.put(record);
 			await this.blobs.where('draftId').equals(record.id).delete();
@@ -128,12 +150,23 @@ export class DraftStore extends Dexie {
 			);
 		});
 	}
-	async remember(person: Identity | null) {
-		if (!person?.member) {
-			await this.context.delete('active');
-			return;
-		}
-		await this.transaction('rw', this.context, async () => {
+	async beginIdentityRefresh() {
+		return this.transaction('rw', this.identity, async () => {
+			const generation = ((await this.identity.get('generation'))?.generation ?? 0) + 1;
+			await this.identity.put({ id: 'generation', generation });
+			return generation;
+		});
+	}
+	async remember(person: Identity | null, expectedGeneration?: number) {
+		return this.transaction('rw', this.context, this.identity, async () => {
+			const generation = (await this.identity.get('generation'))?.generation ?? 0;
+			if (expectedGeneration !== undefined && expectedGeneration !== generation) return false;
+			if (expectedGeneration === undefined)
+				await this.identity.put({ id: 'generation', generation: generation + 1 });
+			if (!person?.member) {
+				await this.context.delete('active');
+				return true;
+			}
 			const previous = await this.current();
 			await this.context.put({
 				id: 'active',
@@ -147,6 +180,15 @@ export class DraftStore extends Dexie {
 				),
 				logoutUntil: previous?.ownerId === person.id ? previous.logoutUntil : undefined
 			});
+			return true;
+		});
+	}
+	async forgetOwner(ownerId: string) {
+		return this.transaction('rw', this.context, this.identity, async () => {
+			if ((await this.current())?.ownerId !== ownerId) return false;
+			await this.beginIdentityRefresh();
+			await this.context.delete('active');
+			return true;
 		});
 	}
 	async current() {
@@ -172,12 +214,93 @@ export class DraftStore extends Dexie {
 			return adopted;
 		});
 	}
+	async lockEditor(
+		id: string,
+		ownerId: string | null,
+		token: string
+	): Promise<(() => Promise<void>) | undefined> {
+		const locks = browserLocks();
+		if (!locks) {
+			if (!(await this.markEditor(id, ownerId, token))) return;
+			return () => this.releaseEditor(id, ownerId, token);
+		}
+		return new Promise((resolve, reject) => {
+			const completion = locks
+				.request(editorKey(this.name, id), { ifAvailable: true }, async (lock) => {
+					if (!lock || !(await this.markEditor(id, ownerId, token))) {
+						resolve(undefined);
+						return;
+					}
+					let release!: () => void;
+					const held = new Promise<void>((done) => {
+						release = done;
+					});
+					resolve(async () => {
+						await this.releaseEditor(id, ownerId, token);
+						release();
+						await completion;
+					});
+					await held;
+				})
+				.catch(reject);
+		});
+	}
+	private async markEditor(id: string, ownerId: string | null, token: string) {
+		return this.transaction('rw', this.drafts, async () => {
+			const record = await this.get(id, ownerId);
+			if (!record || record.attemptedAt || record.status === 'saved') return false;
+			await this.drafts.put({ ...record, editorToken: token });
+			return true;
+		});
+	}
+	async releaseEditor(id: string, ownerId: string | null, token: string) {
+		await this.transaction('rw', this.drafts, async () => {
+			const record = await this.get(id, ownerId);
+			if (record?.editorToken === token)
+				await this.drafts.put({ ...record, editorToken: undefined });
+		});
+	}
 	async claim(id: string, ownerId: string) {
-		return this.transaction('rw', this.drafts, this.context, async () => {
+		const locks = browserLocks();
+		if (locks)
+			return locks.request(editorKey(this.name, id), { ifAvailable: true }, (lock) =>
+				lock ? this.claimUnlocked(id, ownerId, true) : undefined
+			);
+		return this.claimUnlocked(id, ownerId, false);
+	}
+	private async claimUnlocked(id: string, ownerId: string, exclusive: boolean) {
+		return this.transaction('rw', this.drafts, this.blobs, this.context, async () => {
 			const active = await this.current();
 			if (active?.ownerId === ownerId && (active.logoutUntil ?? 0) > Date.now()) return;
 			const record = await this.get(id, ownerId);
-			if (!record || record.status === 'saved' || (record.leaseUntil ?? 0) > Date.now()) return;
+			if (
+				!record ||
+				record.status === 'saved' ||
+				(record.leaseUntil ?? 0) > Date.now() ||
+				(!exclusive && !!record.editorToken)
+			)
+				return;
+			if (!record.attemptedAt) {
+				const photos = await this.blobs.where('draftId').equals(id).toArray();
+				const bytes =
+					new TextEncoder().encode(JSON.stringify(capturePayload(record.draft))).byteLength +
+					4096 +
+					photos.reduce(
+						(total, photo) =>
+							total + photo.blob.size + new TextEncoder().encode(photo.name).byteLength + 1024,
+						0
+					);
+				if (bytes > 60_000_000) {
+					await this.drafts.put({
+						...record,
+						status: 'needsattention',
+						message:
+							'These photos are too large together. Remove some photos or choose smaller versions, then save again.',
+						updatedAt: Date.now()
+					});
+					return;
+				}
+			}
 			const attempted = {
 				...record,
 				status: 'syncing' as const,
@@ -232,12 +355,13 @@ export class DraftStore extends Dexie {
 		});
 	}
 	async beginSignOut(ownerId: string) {
-		await this.transaction('rw', this.drafts, this.context, async () => {
+		await this.transaction('rw', this.drafts, this.context, this.identity, async () => {
 			const active = await this.current();
 			if (active?.ownerId !== ownerId)
 				throw new Error('The signed-in account changed. Review its drafts before signing out.');
 			if ((await this.list(ownerId)).some((record) => (record.leaseUntil ?? 0) > Date.now()))
 				throw new Error('Synchronisation is still running. Wait before signing out.');
+			await this.beginIdentityRefresh();
 			await this.context.put({ ...active, logoutUntil: Date.now() + 60_000 });
 		});
 	}

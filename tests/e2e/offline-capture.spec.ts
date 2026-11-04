@@ -185,6 +185,9 @@ test('recovers a lost response after reauthentication without exposing or upload
 			await route.abort('failed');
 		});
 		await page.goto(origin + '/capture?list=visible');
+		await expect(
+			page.getByRole('checkbox', { name: 'Child · Birthday Birthday', exact: true })
+		).toBeChecked();
 		await page.getByLabel('Title', { exact: true }).fill('Lost response kite');
 		await page.getByRole('button', { name: 'Save idea', exact: true }).click();
 		await expect(page.getByRole('heading', { name: 'Needs attention', exact: true })).toBeVisible();

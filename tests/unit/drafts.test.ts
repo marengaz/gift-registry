@@ -1,8 +1,8 @@
 import 'fake-indexeddb/auto';
 import Dexie from 'dexie';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DraftStore } from '../../src/lib/client/drafts';
-import { syncDrafts } from '../../src/lib/client/sync';
+import { refreshCaptureIdentity, syncDrafts } from '../../src/lib/client/sync';
 import { emptyDraft, type Identity } from '../../src/lib/catalogue-types';
 const names: string[] = [];
 function store(name = crypto.randomUUID()) {
@@ -10,6 +10,8 @@ function store(name = crypto.randomUUID()) {
 	return new DraftStore(name);
 }
 afterEach(async () => {
+	vi.useRealTimers();
+	vi.unstubAllGlobals();
 	for (const name of names.splice(0)) await Dexie.delete(name);
 });
 const draft = () => ({ ...emptyDraft(), title: 'A train', listIds: ['birthday'] });
@@ -177,6 +179,195 @@ describe('sign-out coordination', () => {
 		const record = await db.save({ ownerId: 'a', draft: draft(), photos: [] });
 		await db.claim(record.id, 'a');
 		await expect(db.beginSignOut('a')).rejects.toThrow(/synchron/i);
+		db.close();
+	});
+});
+
+describe('capture recovery boundaries', () => {
+	it('discards an old identity response after a newer account refresh has committed', async () => {
+		const db = store();
+		const other = new DraftStore(db.name);
+		let finish!: (response: Response) => void;
+		const first = refreshCaptureIdentity(
+			db,
+			() =>
+				new Promise((resolve) => {
+					finish = resolve;
+				})
+		);
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		await refreshCaptureIdentity(other, async () => Response.json(person('b')));
+		finish(Response.json(person('a')));
+		expect(await first).toBeNull();
+		expect((await db.current())?.ownerId).toBe('b');
+		other.close();
+		db.close();
+	});
+	it('discards an old unauthorised response after a newer account refresh has committed', async () => {
+		const db = store();
+		let finish!: (response: Response) => void;
+		const first = refreshCaptureIdentity(
+			db,
+			() =>
+				new Promise((resolve) => {
+					finish = resolve;
+				})
+		);
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		await refreshCaptureIdentity(db, async () => Response.json(person('b')));
+		finish(new Response('', { status: 401 }));
+		await first;
+		expect((await db.current())?.ownerId).toBe('b');
+		db.close();
+	});
+	it('keeps an oversized collection of individually valid photos editable before any attempt', async () => {
+		const db = store();
+		const photo = new File([new Uint8Array(11 * 1024 * 1024)], 'photo.png', { type: 'image/png' });
+		const record = await db.save({ ownerId: 'a', draft: draft(), photos: Array(6).fill(photo) });
+		const requests: string[] = [];
+		await syncDrafts(
+			db,
+			async (url) => {
+				requests.push(String(url));
+				return url === '/api/me'
+					? Response.json(person('a'))
+					: new Response('too large', { status: 413 });
+			},
+			'a'
+		);
+		expect(requests).toEqual(['/api/me']);
+		expect((await db.get(record.id, 'a'))?.attemptedAt).toBeUndefined();
+		await expect(
+			db.save({ id: record.id, ownerId: 'a', draft: draft(), photos: [photo] })
+		).resolves.toBeDefined();
+		db.close();
+	});
+});
+
+describe('bounded and coordinated recovery', () => {
+	it('invalidates identity requests begun before sign-out', async () => {
+		const db = store();
+		await db.remember(person('a'));
+		let finish!: (response: Response) => void;
+		let started!: () => void;
+		const received = new Promise<void>((resolve) => {
+			started = resolve;
+		});
+		const pending = refreshCaptureIdentity(db, () => {
+			started();
+			return new Promise((resolve) => {
+				finish = resolve;
+			});
+		});
+		await received;
+		await db.beginSignOut('a');
+		finish(Response.json(person('a')));
+		expect(await pending).toBeNull();
+		expect((await db.current())?.logoutUntil).toBeGreaterThan(Date.now());
+		db.close();
+	});
+	it.each([
+		{ backend: 'browser lock', fallback: false },
+		{ backend: 'persisted fallback token', fallback: true }
+	])('keeps an open $backend excluded while its tab is suspended', async ({ fallback }) => {
+		if (fallback) vi.stubGlobal('navigator', {});
+		const db = store();
+		const value = await db.save({ ownerId: 'a', draft: draft(), photos: [] });
+		const release = await db.lockEditor(value.id, 'a', 'editor-a');
+		vi.useFakeTimers({ toFake: ['Date'] });
+		vi.setSystemTime(Date.now() + 100_000);
+		expect(await db.claim(value.id, 'a')).toBeUndefined();
+		await release!();
+		expect(await db.claim(value.id, 'a')).toBeDefined();
+		db.close();
+	});
+	it('times out identity responses including a stalled body without changing the local account', async () => {
+		const db = store();
+		await db.remember(person('a'));
+		vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+		let started!: () => void;
+		const received = new Promise<void>((resolve) => {
+			started = resolve;
+		});
+		const pending = refreshCaptureIdentity(db, async () => {
+			started();
+			return new Response(new ReadableStream({ start() {} }), {
+				headers: { 'content-type': 'application/json' }
+			});
+		});
+		const rejection = expect(pending).rejects.toThrow(/timed out/i);
+		await received;
+		await vi.advanceTimersByTimeAsync(10_001);
+		await rejection;
+		expect((await db.current())?.ownerId).toBe('a');
+		db.close();
+	});
+	it('times out uploads while retaining the same operation and frozen payload for a safe retry', async () => {
+		const db = store();
+		const value = await db.save({ ownerId: 'a', draft: draft(), photos: [] });
+		vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+		let started!: () => void;
+		let signal: AbortSignal | null | undefined;
+		const received = new Promise<void>((resolve) => {
+			started = resolve;
+		});
+		const pending = syncDrafts(
+			db,
+			async (url, init) => {
+				if (url === '/api/me') return Response.json(person('a'));
+				signal = init?.signal;
+				started();
+				return new Promise(() => {});
+			},
+			'a'
+		);
+		await received;
+		await vi.advanceTimersByTimeAsync(30_001);
+		await pending;
+		const retained = await db.get(value.id, 'a');
+		expect(signal?.aborted).toBe(true);
+		expect(retained?.leaseUntil).toBeUndefined();
+		expect(retained?.attemptedAt).toBeDefined();
+		expect(retained?.operationId).toBe(value.operationId);
+		expect(retained?.payload?.title).toBe('A train');
+		await expect(
+			db.save({ id: value.id, ownerId: 'a', draft: { ...draft(), title: 'Changed' }, photos: [] })
+		).rejects.toThrow(/attempted/i);
+		db.close();
+	});
+});
+
+describe('account-specific sign-out completion', () => {
+	it('clears its own local identity and invalidates a response from before sign-out', async () => {
+		const db = store();
+		await db.remember(person('a'));
+		let finish!: (response: Response) => void;
+		let started!: () => void;
+		const received = new Promise<void>((resolve) => {
+			started = resolve;
+		});
+		const pending = refreshCaptureIdentity(db, () => {
+			started();
+			return new Promise((resolve) => {
+				finish = resolve;
+			});
+		});
+		await received;
+		expect(await db.forgetOwner('a')).toBe(true);
+		finish(Response.json(person('a')));
+		expect(await pending).toBeNull();
+		expect(await db.current()).toBeUndefined();
+		db.close();
+	});
+	it('cannot clear a newer account when an old account finishes signing out in another tab', async () => {
+		const db = store();
+		const other = new DraftStore(db.name);
+		await db.remember(person('a'));
+		const observedByOldSignOut = await db.current();
+		await other.remember(person('b'));
+		expect(await db.forgetOwner(observedByOldSignOut!.ownerId)).toBe(false);
+		expect(await db.current()).toEqual(expect.objectContaining({ ownerId: 'b', name: 'b' }));
+		other.close();
 		db.close();
 	});
 });
