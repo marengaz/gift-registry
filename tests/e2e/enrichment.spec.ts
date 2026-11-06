@@ -1,6 +1,6 @@
 import { test, expect, type BrowserContext } from '@playwright/test';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { makeSignature } from 'better-auth/crypto';
@@ -142,8 +142,14 @@ test('prefills editable source details and privately imports the picture, then c
 			route.fulfill({ contentType: 'image/webp', body: picture })
 		);
 		await page.goto(origin + '/capture?list=visible');
-		await page.getByLabel('Source link', { exact: true }).fill('https://shop.example/train');
+		await expect(
+			page.locator('form.editor').getByRole('button', { name: /^Save (idea|on this device)$/ })
+		).toHaveCount(1);
+		await expect(page.locator('form.editor .panel')).toHaveCount(0);
+		await page.getByLabel('Product link', { exact: true }).fill('https://shop.example/train');
 		await expect(page.getByLabel('Title', { exact: true })).toHaveValue('Imported train');
+		await expect(page.getByLabel('Estimated price (£)', { exact: true })).toHaveValue('19.50');
+		await page.getByText('More details', { exact: true }).click();
 		await expect(page.getByLabel('Price', { exact: true })).toHaveValue('19.50');
 		await expect(page.getByText('retailer-image.webp', { exact: false })).toBeVisible();
 		await page.getByLabel('Variant or size').fill('Blue deluxe');
@@ -174,6 +180,151 @@ test('prefills editable source details and privately imports the picture, then c
 			path: '/private/tmp/gift-identification-settings-desktop.png',
 			fullPage: true
 		});
+	} finally {
+		await context.close();
+	}
+});
+
+test('saves one link-only idea when the retailer cannot fill in its details', async ({
+	browser
+}) => {
+	const context = await browser.newContext({ extraHTTPHeaders: { 'x-forwarded-proto': 'http' } });
+	await signIn(context);
+	const page = await context.newPage();
+	try {
+		await context.route('**/api/metadata', (route) =>
+			route.fulfill({
+				json: {
+					suggestions: [],
+					message: 'This shop could not be reached. You can still save the link.'
+				}
+			})
+		);
+		await page.goto(origin + '/capture?list=visible');
+		await expect(page.getByRole('checkbox', { name: /Birthday/ })).toBeChecked();
+		await page.getByLabel('Product link', { exact: true }).fill('https://shop.example/only-link');
+		await expect(page.getByText('This shop could not be reached.', { exact: false })).toBeVisible();
+		await page.getByRole('button', { name: 'Save idea', exact: true }).click();
+		await expect(page.getByRole('heading', { name: 'Idea saved', exact: true })).toBeVisible();
+		const href = await page
+			.getByRole('link', { name: 'View idea', exact: true })
+			.getAttribute('href');
+		const saved = await (await context.request.get(origin + '/api' + href)).json();
+		expect(saved).toMatchObject({
+			title: 'Idea from shop.example',
+			sourceUrl: 'https://shop.example/only-link'
+		});
+		expect(saved.entries).toHaveLength(1);
+	} finally {
+		await context.close();
+	}
+});
+
+test('saves a photo-only idea with a placeholder name and keeps its picture', async ({
+	browser
+}) => {
+	const context = await browser.newContext({ extraHTTPHeaders: { 'x-forwarded-proto': 'http' } });
+	await signIn(context);
+	const page = await context.newPage();
+	try {
+		await page.goto(origin + '/capture?list=visible');
+		await expect(page.getByRole('checkbox', { name: /Birthday/ })).toBeChecked();
+		const picture = await sharp({
+			create: { width: 3, height: 3, channels: 3, background: '#79a' }
+		})
+			.png()
+			.toBuffer();
+		await page.getByLabel('Photos').setInputFiles({
+			name: 'shop-photo.png',
+			mimeType: 'image/png',
+			buffer: picture
+		});
+		await page.getByRole('button', { name: 'Save idea', exact: true }).click();
+		await expect(page.getByRole('heading', { name: 'Idea saved', exact: true })).toBeVisible();
+		await page.getByRole('link', { name: 'View idea', exact: true }).click();
+		await expect(page.getByRole('heading', { name: 'Untitled idea', exact: true })).toBeVisible();
+		const photo = page.getByRole('img', { name: 'Untitled idea', exact: true });
+		await expect(photo).toBeVisible();
+		const source = await photo.getAttribute('src');
+		expect(source).toBeTruthy();
+		expect((await context.request.get(origin + source)).status()).toBe(200);
+	} finally {
+		await context.close();
+	}
+});
+
+test('restores a removed photo when the same file is chosen again', async ({ browser }) => {
+	const context = await browser.newContext({ extraHTTPHeaders: { 'x-forwarded-proto': 'http' } });
+	await signIn(context);
+	const page = await context.newPage();
+	try {
+		const path = test.info().outputPath('same-photo.png');
+		writeFileSync(
+			path,
+			await sharp({
+				create: { width: 3, height: 3, channels: 3, background: '#79a' }
+			})
+				.png()
+				.toBuffer()
+		);
+		await page.goto(origin + '/capture?list=visible');
+		const input = page.getByLabel('Photos');
+		const preview = page.getByRole('img', { name: 'same-photo.png', exact: true });
+		await input.setInputFiles(path);
+		await expect(preview).toBeVisible();
+		await page.getByRole('button', { name: 'Remove same-photo.png', exact: true }).click();
+		await expect(preview).toHaveCount(0);
+		await input.setInputFiles(path);
+		await expect(preview).toBeVisible();
+	} finally {
+		await context.close();
+	}
+});
+
+test('fills only empty idea fields from a link and keeps the user’s title and GBP estimate', async ({
+	browser
+}) => {
+	const context = await browser.newContext({ extraHTTPHeaders: { 'x-forwarded-proto': 'http' } });
+	await signIn(context);
+	const page = await context.newPage();
+	try {
+		await context.route('**/api/metadata', (route) =>
+			route.fulfill({
+				json: {
+					suggestions: [
+						{
+							title: 'Retailer title',
+							description: 'Retailer description',
+							variant: null,
+							imageUrl: null,
+							sourceUrl: 'https://shop.example/details',
+							retrievedAt: 123,
+							source: 'json-ld',
+							offer: {
+								url: 'https://shop.example/details',
+								retailer: 'Shop',
+								priceMinor: 3892,
+								currency: 'GBP',
+								priceText: '38.92',
+								fromPrice: false
+							},
+							uncertainty: []
+						}
+					],
+					message: 'Review the details.'
+				}
+			})
+		);
+		await page.goto(origin + '/capture?list=visible');
+		await expect(page.getByRole('checkbox', { name: /Birthday/ })).toBeChecked();
+		await page.getByLabel('Title', { exact: true }).fill('My own gift title');
+		await page.getByLabel('Estimated price (£)', { exact: true }).fill('25.00');
+		await page.getByLabel('Product link', { exact: true }).fill('https://shop.example/details');
+		await expect(page.getByLabel('Description', { exact: true })).toHaveValue(
+			'Retailer description'
+		);
+		await expect(page.getByLabel('Title', { exact: true })).toHaveValue('My own gift title');
+		await expect(page.getByLabel('Estimated price (£)', { exact: true })).toHaveValue('25.00');
 	} finally {
 		await context.close();
 	}

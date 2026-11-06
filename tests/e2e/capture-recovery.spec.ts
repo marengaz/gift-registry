@@ -410,14 +410,16 @@ test('keeps a knowingly signed-out unfinished idea unbound when a later account 
 		await expect(
 			capturing.getByText('You can keep an unbound draft on this device.', { exact: false })
 		).toBeVisible();
-		await expect(capturing.getByRole('button', { name: 'Save idea', exact: true })).toBeEnabled();
+		await expect(
+			capturing.getByRole('button', { name: 'Save on this device', exact: true })
+		).toBeEnabled();
 		await capturing
 			.getByLabel('Title', { exact: true })
 			.fill('Knowingly unbound before later sign-in');
 		await signIn(context, 'other');
 		await switching.goto(origin + '/capture');
 		await readyToCapture(switching);
-		await capturing.getByRole('button', { name: 'Save idea', exact: true }).click();
+		await capturing.getByRole('button', { name: 'Save on this device', exact: true }).click();
 		await expect(
 			capturing.getByRole('button', { name: 'Adopt with my signed-in account', exact: true })
 		).toBeVisible();

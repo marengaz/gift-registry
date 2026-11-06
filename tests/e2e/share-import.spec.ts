@@ -185,8 +185,8 @@ test('imports Android URL, text and photo shares locally and requires explicit a
 		await initialise(page);
 		await submitShare(page, { url: 'https://retailer.example/train' });
 		await expect(page).toHaveURL(/\/capture\?draft=/);
-		await expect(page.getByLabel('Source link')).toHaveValue('https://retailer.example/train');
-		await expect(page.getByLabel('Source link')).toBeEditable();
+		await expect(page.getByLabel('Product link')).toHaveValue('https://retailer.example/train');
+		await expect(page.getByLabel('Product link')).toBeEditable();
 		await expect(page.getByLabel('Title', { exact: true })).toHaveValue('');
 		expect((await records(page))[0].ownerId).toBeNull();
 		await submitShare(
@@ -204,7 +204,7 @@ test('imports Android URL, text and photo shares locally and requires explicit a
 		);
 		await expect(page).toHaveURL(/\/capture\?draft=/);
 		await expect(page.getByLabel('Title', { exact: true })).toHaveValue('Shared photo train');
-		await expect(page.getByLabel('Source link')).toHaveValue(
+		await expect(page.getByLabel('Product link')).toHaveValue(
 			'https://retailer.example/photo-train'
 		);
 		await expect(page.getByText('shop-train.png', { exact: false })).toBeVisible();
@@ -223,7 +223,7 @@ test('imports Android URL, text and photo shares locally and requires explicit a
 		}, first.id);
 		await page.getByRole('link', { name: 'Open the first shared draft', exact: true }).click();
 		await expect(page).toHaveURL(origin + '/capture?draft=' + first.id);
-		await expect(page.getByLabel('Source link')).toHaveValue('https://retailer.example/train');
+		await expect(page.getByLabel('Product link')).toHaveValue('https://retailer.example/train');
 		await page.evaluate((id) => {
 			const link = document.createElement('a');
 			link.href = '/capture?draft=' + id;
@@ -324,7 +324,7 @@ test('reopens the public capture screen offline, keeps a photo and list, then sy
 		await expect(page.getByLabel('Title', { exact: true })).toHaveValue(
 			'Offline shared shop photo'
 		);
-		await expect(page.getByLabel('Source link')).toHaveValue(
+		await expect(page.getByLabel('Product link')).toHaveValue(
 			'https://retailer.example/offline-photo'
 		);
 		const unbound = (await records(page)).find(

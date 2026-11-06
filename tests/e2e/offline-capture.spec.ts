@@ -132,6 +132,7 @@ test('keeps offline photos and lists across a closed page and synchronises once 
 		await expect(page.getByLabel('Title', { exact: true })).toBeVisible();
 		await context.setOffline(true);
 		await page.getByLabel('Title', { exact: true }).fill('Offline photo train');
+		await page.getByText('More details', { exact: true }).click();
 		await page.getByLabel('Original text or notes').fill('Shop window, saved without a connection');
 		const png = await sharp({ create: { width: 20, height: 20, channels: 3, background: '#789' } })
 			.png()

@@ -3,7 +3,7 @@
 	import { liveQuery } from 'dexie';
 	import { page } from '$app/state';
 	import CaptureEditor from '#lib/components/CaptureEditor.svelte';
-	import { emptyDraft } from '#lib/catalogue-types.ts';
+	import { emptyDraft, captureTitle } from '#lib/catalogue-types.ts';
 	import {
 		draftStore,
 		requestPersistentStorage,
@@ -547,6 +547,7 @@
 			locked={!!current?.attemptedAt || busy || !editorReady || blocked}
 			onSave={save}
 			localCapture
+			canSynchronise={!!formOwner && formOwner === context?.ownerId}
 			onListsChanged={() => {
 				requestedListPending = null;
 			}}
@@ -578,7 +579,7 @@
 			<ul class="draft-list">
 				{#each [...records, ...imports] as record}<li>
 						<button class="quiet" onclick={() => open(record.id)}
-							>{record.draft.title || 'Untitled idea'}</button
+							>{captureTitle(record.draft)}</button
 						><span>{statusText(record.status)}{!record.ownerId ? ' · account needed' : ''}</span>
 					</li>{/each}
 			</ul>

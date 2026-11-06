@@ -25,3 +25,20 @@ it('formats original currency prices without changing their scale', () => {
 	expect(priceInput(1235, 'KWD')).toBe('1.235');
 	expect(priceInput(null, 'GBP')).toBe('');
 });
+
+it('keeps a link-only or notes-only idea saveable without inventing product details', () => {
+	const draft = emptyDraft();
+	draft.sourceUrl = 'https://shop.example/product/123';
+	expect(capturePayload(draft)).toMatchObject({
+		title: 'Idea from shop.example',
+		sourceUrl: draft.sourceUrl,
+		estimatePence: null,
+		offers: []
+	});
+	draft.title = 'My own title';
+	expect(capturePayload(draft).title).toBe('My own title');
+	draft.title = '';
+	draft.sourceUrl = '';
+	draft.description = 'A train from the shop window';
+	expect(capturePayload(draft).title).toBe('A train from the shop window');
+});

@@ -35,6 +35,13 @@
 				draft.description = candidate.description;
 			if (!draft.variant.trim() && candidate.variant) draft.variant = candidate.variant;
 			const currency = candidate.offer?.currency;
+			if (
+				!draft.estimate.trim() &&
+				candidate.offer?.currency === 'GBP' &&
+				!candidate.offer.fromPrice &&
+				candidate.offer.priceMinor != null
+			)
+				draft.estimate = priceInput(candidate.offer.priceMinor, 'GBP');
 			if (!draft.offers.length && candidate.offer && currency) {
 				const offer = candidate.offer;
 				draft.offers = [

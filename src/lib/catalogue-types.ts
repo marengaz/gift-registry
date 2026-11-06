@@ -85,9 +85,18 @@ export function formatPrice(value: number, currency: string): string {
 	);
 }
 export const pence = (value: string) => parsePriceMinor(value, 'GBP');
+export function captureTitle(draft: CaptureDraft): string {
+	if (draft.title.trim()) return draft.title.trim();
+	if (draft.sourceUrl && URL.canParse(draft.sourceUrl))
+		return 'Idea from ' + new URL(draft.sourceUrl).hostname.replace(/^www\./, '');
+	return (
+		(draft.description.trim() || draft.sourceText.trim()).split('\n')[0].slice(0, 120) ||
+		'Untitled idea'
+	);
+}
 export function capturePayload(draft: CaptureDraft) {
 	return {
-		title: draft.title,
+		title: captureTitle(draft),
 		description: draft.description,
 		variant: draft.variant,
 		sourceUrl: draft.sourceUrl,

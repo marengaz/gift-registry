@@ -100,6 +100,7 @@ test('administrator organises, captures with photo, edits and searches at deskto
 	await page.getByRole('link', { name: '+ Add an idea' }).click();
 	await page.getByLabel('Title', { exact: true }).fill('Woodland puzzle');
 	await page.getByLabel('Estimated price (£)', { exact: true }).fill('18.50');
+	await page.getByText('More details', { exact: true }).click();
 	await page.getByLabel('Labels').fill('age 5, puzzles');
 	await page.getByLabel('Original text or notes').fill('Spotted in a shop window');
 	await page.getByRole('button', { name: 'Add shopping link' }).click();
@@ -123,6 +124,7 @@ test('administrator organises, captures with photo, edits and searches at deskto
 	await expect(page.getByText('£18.50')).toBeVisible();
 	await expect(page.getByRole('img', { name: 'Woodland puzzle' })).toBeVisible();
 	await page.getByRole('button', { name: 'Edit idea', exact: true }).click();
+	await page.getByText('More details', { exact: true }).click();
 	await expect(page.getByLabel('Currency', { exact: true })).toHaveValue('JPY');
 	await page.getByLabel('Variant or size').fill('100 pieces');
 	await page.getByRole('button', { name: 'Save changes', exact: true }).click();
@@ -149,7 +151,7 @@ test('administrator organises, captures with photo, edits and searches at deskto
 	await page.keyboard.press('Enter');
 	await expect(page.locator('#main-content')).toBeFocused();
 	await page.keyboard.press('Tab');
-	await expect(page.getByLabel('Title', { exact: true })).toBeFocused();
+	await expect(page.getByLabel('Product link', { exact: true })).toBeFocused();
 	expect(errors).toEqual([]);
 });
 

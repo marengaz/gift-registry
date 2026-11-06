@@ -99,7 +99,7 @@ async function delayImageBody(page: Page) {
 		})
 	);
 	await page.goto(origin + '/capture');
-	await page.getByLabel('Source link', { exact: true }).fill('https://shop.example/train');
+	await page.getByLabel('Product link', { exact: true }).fill('https://shop.example/train');
 	await expect
 		.poll(() =>
 			page.evaluate(() => (window as Window & { imageBodyReading?: boolean }).imageBodyReading)
@@ -150,7 +150,7 @@ test('does not attach an earlier lookup image to a replacement draft with the sa
 		).toHaveCount(0);
 		await expect(page.getByLabel('Title', { exact: true })).toHaveValue('');
 		await page.getByLabel('Title', { exact: true }).fill('Another idea');
-		await page.getByLabel('Source link', { exact: true }).fill('https://shop.example/train');
+		await page.getByLabel('Product link', { exact: true }).fill('https://shop.example/train');
 		await finishImageBody(page);
 		await expect(page.getByLabel('Title', { exact: true })).toHaveValue('Another idea');
 		await expect(page.getByText('retailer-image.webp', { exact: false })).toHaveCount(0);
