@@ -176,7 +176,13 @@ it('uses the pinned address through a real TLS socket and never connects a prote
 				authorization: request.headers.authorization,
 				cookie: request.headers.cookie
 			});
-			response.end('real TLS product page');
+			response.end(
+				request.url === '/large'
+					? 'x'.repeat(3 * 1024 * 1024)
+					: request.url === '/oversized'
+						? 'x'.repeat(8 * 1024 * 1024 + 1)
+						: 'real TLS product page'
+			);
 		}
 	);
 	server.on('connection', () => connections++);
@@ -214,6 +220,21 @@ it('uses the pinned address through a real TLS socket and never connects a prote
 		);
 		expect(connections).toBe(1);
 		expect(received).toHaveLength(1);
+		const retailer: PublicFetchDependencies = {
+			resolve: async () => [{ address: '93.184.216.34', family: 4 }],
+			request: (url, _address, limits) =>
+				pinnedRequest(
+					new URL(`https://shop.fixture.test:${port}${url.pathname}`),
+					{ address: '127.0.0.1', family: 4 },
+					limits,
+					factory
+				)
+		};
+		const large = await publicFetch('https://shop.fixture.test/large', {}, retailer);
+		expect(large.body.length).toBe(3 * 1024 * 1024);
+		await expect(publicFetch('https://shop.fixture.test/oversized', {}, retailer)).rejects.toThrow(
+			'too large'
+		);
 	} finally {
 		await new Promise<void>((resolve) => server.close(() => resolve()));
 		rmSync(directory, { recursive: true, force: true });

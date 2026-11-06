@@ -112,6 +112,49 @@ export function extractMetadata(
 		};
 	});
 	if (suggestions.length) return suggestions;
+	if (['amazon.co.uk', 'www.amazon.co.uk'].includes(new URL(sourceUrl).hostname)) {
+		const productTitle = plain($('#productTitle').text());
+		if (productTitle) {
+			const priceText =
+				[
+					'#corePriceDisplay_desktop_feature_div .a-price:not(.a-text-price) .a-offscreen',
+					'#corePrice_feature_div .a-price:not(.a-text-price) .a-offscreen'
+				]
+					.map((selector) => plain($(selector).first().text()))
+					.find(Boolean) ?? null;
+			const amount = priceText?.match(/^£\s*((?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{1,2})?)$/)?.[1];
+			let priceMinor: number | null = null;
+			if (amount) {
+				try {
+					priceMinor = parsePriceMinor(amount.replaceAll(',', ''), 'GBP');
+				} catch {}
+			}
+			return [
+				{
+					title: productTitle,
+					description: plain(meta('description')),
+					variant: null,
+					imageUrl:
+						image(
+							$('#landingImage').attr('data-old-hires') || $('#landingImage').attr('src'),
+							sourceUrl
+						) ?? fallbackImage,
+					sourceUrl,
+					retrievedAt,
+					source: 'retailer-page',
+					offer: {
+						url: sourceUrl,
+						retailer: 'Amazon',
+						priceMinor,
+						currency: amount ? 'GBP' : null,
+						priceText,
+						fromPrice: false
+					},
+					uncertainty: ['Check the selected pack, colour and current price at Amazon.']
+				}
+			];
+		}
+	}
 	const title = plain(meta('og:title')) ?? plain($('title').first().text());
 	const description = plain(meta('og:description')) ?? plain(meta('description'));
 	const priceText = plain(meta('product:price:amount') ?? meta('og:price:amount'));

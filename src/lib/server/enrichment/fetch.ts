@@ -3,6 +3,8 @@ import { request as httpsRequest, type RequestOptions } from 'node:https';
 import { isIP } from 'node:net';
 import type { IncomingHttpHeaders, ClientRequest } from 'node:http';
 import ipaddr from 'ipaddr.js';
+export class PublicFetchError extends Error {}
+
 export type Address = { address: string; family: number };
 export type FetchLimits = { maxBytes: number; timeoutMs: number };
 export type FetchResponse = { status: number; headers: IncomingHttpHeaders; body: Buffer };
@@ -30,7 +32,7 @@ export function publicUrl(value: string): URL {
 		(!host.includes('.') && !isIP(host)) ||
 		(isIP(host) && !publicAddress(host))
 	)
-		throw new Error('Only public HTTPS product links are supported.');
+		throw new PublicFetchError('Only public HTTPS product links are supported.');
 	return url;
 }
 export function pinnedRequest(
@@ -66,8 +68,8 @@ export function pinnedRequest(
 		};
 		let request: ClientRequest | undefined;
 		const timer = setTimeout(() => {
+			finish(new PublicFetchError('The shop took too long to respond.'));
 			request?.destroy();
-			finish(new Error('The public page took too long to respond.'));
 		}, limits.timeoutMs);
 		try {
 			request = requestFactory(url, options, (response) => {
@@ -77,17 +79,17 @@ export function pinnedRequest(
 					response.headers['content-encoding'] &&
 					response.headers['content-encoding'] !== 'identity'
 				) {
+					finish(new PublicFetchError('This shop sent a compressed page that could not be read.'));
 					response.destroy();
 					request?.destroy();
-					finish(new Error('Compressed page responses are not supported.'));
 					return;
 				}
 				response.on('data', (part: Buffer) => {
 					bytes += part.length;
 					if (bytes > limits.maxBytes) {
+						finish(new PublicFetchError('The retailer page is too large to read safely.'));
 						response.destroy();
 						request?.destroy();
-						finish(new Error('The public response is too large.'));
 						return;
 					}
 					chunks.push(Buffer.from(part));
@@ -100,12 +102,18 @@ export function pinnedRequest(
 						body: Buffer.concat(chunks)
 					})
 				);
-				response.on('aborted', () => finish(new Error('The public response was interrupted.')));
+				response.on('aborted', () =>
+					finish(new PublicFetchError('The public response was interrupted.'))
+				);
 			});
 			request.on('error', (error) => finish(error));
 			request.end();
 		} catch (error) {
-			finish(error instanceof Error ? error : new Error('The public request could not be opened.'));
+			finish(
+				error instanceof Error
+					? error
+					: new PublicFetchError('The public request could not be opened.')
+			);
 		}
 	});
 }
@@ -119,14 +127,14 @@ export async function publicFetch(
 	dependencies: PublicFetchDependencies = defaults
 ): Promise<FetchResponse & { url: string }> {
 	const bounds = {
-		maxBytes: limits.maxBytes ?? 2 * 1024 * 1024,
+		maxBytes: limits.maxBytes ?? 8 * 1024 * 1024,
 		timeoutMs: limits.timeoutMs ?? 10000
 	};
 	const started = Date.now();
 	let url = publicUrl(value);
 	for (let redirects = 0; redirects <= 3; redirects++) {
 		const remaining = bounds.timeoutMs - (Date.now() - started);
-		if (remaining <= 0) throw new Error('The public page took too long to respond.');
+		if (remaining <= 0) throw new PublicFetchError('The public page took too long to respond.');
 		const hostname = url.hostname.replace(/^\[|\]$/g, '');
 		let timer: ReturnType<typeof setTimeout> | undefined;
 		let addresses: Address[];
@@ -137,7 +145,7 @@ export async function publicFetch(
 					: dependencies.resolve(hostname),
 				new Promise<never>((_, reject) => {
 					timer = setTimeout(
-						() => reject(new Error('The public address lookup timed out.')),
+						() => reject(new PublicFetchError('The public address lookup timed out.')),
 						remaining
 					);
 				})
@@ -146,7 +154,7 @@ export async function publicFetch(
 			clearTimeout(timer);
 		}
 		if (!addresses.length || addresses.some((answer) => !publicAddress(answer.address)))
-			throw new Error('The link points to a protected network address.');
+			throw new PublicFetchError('The link points to a protected network address.');
 		const response = await dependencies.request(url, addresses[0], {
 			...bounds,
 			timeoutMs: Math.max(1, bounds.timeoutMs - (Date.now() - started))
@@ -154,15 +162,15 @@ export async function publicFetch(
 		if ([301, 302, 303, 307, 308].includes(response.status)) {
 			const location = response.headers.location;
 			if (!location || redirects === 3)
-				throw new Error('The public link redirects too many times.');
+				throw new PublicFetchError('The public link redirects too many times.');
 			url = publicUrl(new URL(location, url).href);
 			continue;
 		}
 		if (response.status < 200 || response.status >= 300)
-			throw new Error(
-				'This page is unavailable or requires a private sign-in. Add a screenshot or enter the details manually.'
+			throw new PublicFetchError(
+				`This shop could not provide the page (HTTP ${response.status}). It may require a sign-in or block automatic reading.`
 			);
 		return { ...response, url: url.href };
 	}
-	throw new Error('The public link redirects too many times.');
+	throw new PublicFetchError('The public link redirects too many times.');
 }

@@ -3,6 +3,18 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { extractMetadata } from '../../src/lib/server/enrichment/metadata';
 
 describe('retailer evidence', () => {
+	it('reads the product photo and exact active GBP price from an Amazon UK page without Open Graph offers', () => {
+		const html =
+			'<title>Amazon.co.uk</title><span id="productTitle">Tile tracker two pack</span><div id="corePriceDisplay_desktop_feature_div"><span class="a-price"><span class="a-offscreen"> </span></span></div><div id="corePrice_feature_div"><span class="a-price a-text-price"><span class="a-offscreen">£49.99</span></span><span class="a-price"><span class="a-offscreen">£38.92</span></span></div><img id="landingImage" data-old-hires="https://m.media-amazon.com/images/I/tracker.jpg">';
+		expect(extractMetadata(html, 'https://www.amazon.co.uk/dp/B0D63573CF', 123)[0]).toMatchObject({
+			title: 'Tile tracker two pack',
+			imageUrl: 'https://m.media-amazon.com/images/I/tracker.jpg',
+			source: 'retailer-page',
+			offer: { priceMinor: 3892, currency: 'GBP', retailer: 'Amazon', fromPrice: false }
+		});
+		expect(extractMetadata(html, 'https://unrelated.example/product', 123)[0].offer).toBeNull();
+	});
+
 	it('extracts product and exact offer metadata with provenance', () => {
 		const results = extractMetadata(
 			readFileSync('tests/fixtures/retailers/game.html', 'utf8'),

@@ -5,7 +5,7 @@ import type { CatalogueEvent } from '../catalogue';
 import type { DatabaseConnection } from '../db/client';
 import { apiResponse, assertSameOrigin } from '../http';
 import { MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS } from '../media';
-import { publicFetch } from './fetch';
+import { publicFetch, PublicFetchError } from './fetch';
 import { extractMetadata } from './metadata';
 function contributor(connection: DatabaseConnection, event: CatalogueEvent) {
 	const actor = requireMember(connection, event.locals.actor);
@@ -32,16 +32,18 @@ export function metadataPreview(
 					.includes('text/html')
 			)
 				throw new Error('No page metadata');
+			const suggestions = extractMetadata(page.body.toString('utf8'), page.url);
 			return {
-				suggestions: extractMetadata(page.body.toString('utf8'), page.url),
-				message: 'Review the imported details. Retailer prices and variants may change.'
+				suggestions,
+				message: suggestions.length
+					? 'Review the imported details. Retailer prices and variants may change.'
+					: 'No product details were found on this page. You can still save the link and fill in anything you know.'
 			};
 		} catch (error) {
 			if (error instanceof AccessError) throw error;
 			return {
 				suggestions: [],
-				message:
-					'This source could not be read. Keep its link and add a screenshot or enter the details manually.'
+				message: `${error instanceof PublicFetchError ? error.message : 'This shop could not be reached.'} You can still save the link, add a photo or screenshot, or enter details yourself.`
 			};
 		}
 	});
