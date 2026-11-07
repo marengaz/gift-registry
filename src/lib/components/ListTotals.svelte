@@ -15,8 +15,9 @@
 		</div>
 	{/each}
 	<p class="explanation">
-		All gifts and allocated gifts use GBP estimates. Allocated includes purchased gifts. Purchased
-		uses actual spend where entered; {totals.purchased.estimatedCount}
+		Totals cover the whole list, including ideas hidden by filters. All gifts and allocated gifts
+		use GBP estimates. Allocated includes purchased gifts. Purchased uses actual spend where
+		entered; {totals.purchased.estimatedCount}
 		{totals.purchased.estimatedCount === 1
 			? 'purchase uses its estimate'
 			: 'purchases use their estimates'}.

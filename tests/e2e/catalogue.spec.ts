@@ -140,6 +140,14 @@ test('administrator organises, captures with photo, edits and searches at deskto
 		.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
 		.toBe(true);
 	await page.screenshot({ path: '/private/tmp/gift-catalogue-mobile.png', fullPage: true });
+	await page.getByRole('button', { name: 'Compact list', exact: true }).click();
+	const thumbnail = page.getByRole('img', { name: 'Woodland puzzle', exact: true });
+	await expect(thumbnail).toBeVisible();
+	expect((await thumbnail.boundingBox())!.width).toBeLessThanOrEqual(80);
+	await page.screenshot({ path: '/private/tmp/gift-compact-mobile.png', fullPage: true });
+	await page.setViewportSize({ width: 1440, height: 1000 });
+	await page.screenshot({ path: '/private/tmp/gift-compact-desktop.png', fullPage: true });
+	await page.setViewportSize({ width: 390, height: 844 });
 	await page.goto(origin + '/capture');
 	await expect(page.getByLabel('Title', { exact: true })).toBeVisible();
 	await expect

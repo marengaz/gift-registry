@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { invalidateAll } from '$app/navigation';
 	import ListTotals from '#lib/components/ListTotals.svelte';
-	import ProductCard from '#lib/components/ProductCard.svelte';
+	import IdeaCollection from '#lib/components/IdeaCollection.svelte';
 	import type { GiftList, Product } from '#lib/catalogue-types.ts';
 	import type { PageProps } from './$types';
 	let { data }: PageProps = $props();
@@ -52,16 +52,15 @@
 		</p>{/if}
 	{#if message}<p class="notice error" role="alert">{message}</p>{/if}
 	{#if data.totals}<ListTotals totals={data.totals} />{/if}
-	{#if data.products.length}<div class="section-heading"><h2>Ideas on this list</h2></div>
-		<div class="product-grid">
-			{#each data.products as product}<ProductCard
-					product={product as Product}
-					lists={data.lists}
-					listId={list.id}
-					buying
-					administrator={data.administrator}
-				/>{/each}
-		</div>{:else}<section class="empty-state">
+	<div class="section-heading"><h2>Ideas on this list</h2></div>
+	<IdeaCollection
+		products={data.products as Product[]}
+		lists={data.lists}
+		kind="list"
+		listId={list.id}
+		administrator={data.administrator}
+	>
+		<section class="empty-state">
 			<div class="empty-symbol" aria-hidden="true">✧</div>
 			<h2>No ideas to show yet</h2>
 			<p class="muted">
@@ -69,5 +68,6 @@
 					? 'Found something they would love? Add a link, photo or a few notes.'
 					: 'Ideas available to you will appear here.'}
 			</p>
-		</section>{/if}
+		</section>
+	</IdeaCollection>
 </main>

@@ -196,7 +196,7 @@ test('retains family sessions, purchases, private photos and uncertain lookup ch
 		await startProcesses();
 		expect((await admin.request.get(origin + '/api/me')).status()).toBe(200);
 		await buy.reload();
-		await expect(buy.getByText('Purchased', { exact: true })).toBeVisible();
+		await expect(train.getByText('Purchased', { exact: true })).toBeVisible();
 		await expect(buy.getByText('£17.50 · actual spend')).toBeVisible();
 		await view.reload();
 		await expect(view.getByRole('heading', { name: 'Box of cards', exact: true })).toBeVisible();

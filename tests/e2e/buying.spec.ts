@@ -110,7 +110,7 @@ test('relatives reserve and purchase their own gifts, while administrator assign
 		await expect(page.getByRole('heading', { name: 'Card game', exact: true })).toBeVisible();
 		await page.getByLabel('Actual GBP spend (optional)').fill('17.50');
 		await page.getByRole('button', { name: 'Mark purchased', exact: true }).click();
-		await expect(page.getByText('Purchased', { exact: true })).toBeVisible();
+		await expect(game.getByText('Purchased', { exact: true })).toBeVisible();
 		await expect(page.getByText('£17.50 · actual spend')).toBeVisible();
 		await expect
 			.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))

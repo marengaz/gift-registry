@@ -13,12 +13,14 @@
 		entry,
 		administrator = false,
 		role,
-		archived = false
+		archived = false,
+		compact = false
 	}: {
 		entry: GiftEntry;
 		administrator?: boolean;
 		role?: string | null;
 		archived?: boolean;
+		compact?: boolean;
 	} = $props();
 	let current = $state<GiftEntry | null>(null);
 	let members = $state<AssignmentMember[]>([]);
@@ -30,6 +32,7 @@
 	let buyerId = $state('');
 	let actual = $state('');
 	let pending = $state<Record<string, unknown> | null>(null);
+	let controlsOpen = $state(false);
 	const gift = $derived(current ?? entry);
 	const availabilityLabel = $derived.by(() => {
 		if (!fresh) return 'Availability needs an online refresh';
@@ -142,84 +145,97 @@
 				? ' · estimate'
 				: ' · actual spend'}
 		</p>{/if}
-	{#if !online}<p class="hint">Buying needs a current online connection.</p>{:else if !fresh}<p
-			class="hint"
-		>
-			Refresh availability before buying.
-		</p>
-		<button class="secondary compact" disabled={busy} onclick={refresh}>Refresh availability</button
-		>{/if}
-	{#if pending}<p class="hint">
-			This action has not been confirmed. Retry it to check the saved result.
-		</p>
-		<button class="secondary compact" disabled={!online || busy} onclick={() => send()}
-			>Retry action</button
-		>{/if}
-	{#if mayBuy}
-		{#if gift.state === 'available' && !archived}<button
-				class="compact"
-				disabled={!enabled}
-				onclick={() => send('reserve')}>Reserve for me</button
-			>{/if}
-		{#if gift.state === 'allocated'}
-			<label
-				>Actual GBP spend (optional)<input
-					aria-label="Actual GBP spend (optional)"
-					inputmode="decimal"
-					placeholder="Leave blank to use estimate"
-					bind:value={actual}
-					disabled={!enabled}
-				/></label
-			>
-			<button class="compact" disabled={!enabled} onclick={() => send('purchase')}
-				>Mark purchased</button
-			>
-			{#if !administrator && gift.allocationSource === 'self'}<button
-					class="secondary compact"
-					disabled={!enabled}
-					onclick={() => send('release')}>Release reservation</button
+	<details
+		class="action-controls"
+		class:expanded={!compact}
+		open={!compact || controlsOpen}
+		ontoggle={(event) => {
+			if (compact) controlsOpen = event.currentTarget.open;
+		}}
+	>
+		<summary>Gift actions</summary>
+		<div class="action-buttons">
+			{#if !online}<p class="hint">Buying needs a current online connection.</p>{:else if !fresh}<p
+					class="hint"
+				>
+					Refresh availability before buying.
+				</p>
+				<button class="secondary compact" disabled={busy} onclick={refresh}
+					>Refresh availability</button
 				>{/if}
-		{/if}
-	{/if}
-	{#if !mayBuy && gift.state === 'allocated'}<p class="hint">
-			Ask the administrator to record a purchase or change your assignment.
-		</p>{/if}
-	{#if administrator}
-		{#if gift.state === 'purchased'}<button
-				class="secondary compact"
-				disabled={!enabled}
-				onclick={() => send('undo')}>Undo purchase</button
-			>{:else}
-			{#if !archived}<label
-					>Assign to<select bind:value={buyerId} disabled={!enabled}
-						><option value="">Choose a person</option>{#each members as person}<option
-								value={person.id}>{person.name} ({person.role})</option
-							>{/each}</select
-					></label
-				><button
-					class="secondary compact"
-					disabled={!enabled || !buyerId}
-					onclick={() => send('assign')}
-					>{gift.state === 'allocated' ? 'Reassign gift' : 'Assign gift'}</button
+			{#if pending}<p class="hint">
+					This action has not been confirmed. Retry it to check the saved result.
+				</p>
+				<button class="secondary compact" disabled={!online || busy} onclick={() => send()}
+					>Retry action</button
 				>{/if}
-			{#if gift.state === 'allocated'}<button
-					class="secondary compact"
-					disabled={!enabled}
-					onclick={() => send('clear')}>Clear allocation</button
-				>{/if}
-		{/if}
-	{/if}
-	{#if administrator && history.length}<details>
-			<summary>Allocation history</summary>
-			<ol>
-				{#each history as record}<li>
-						{record.action} · {record.fromState} → {record.toState} · {new Date(
-							record.createdAt
-						).toLocaleString('en-GB')}
-					</li>{/each}
-			</ol>
-		</details>{/if}
-	{#if message}<p class="error hint" role="alert">{message}</p>{/if}
+			{#if mayBuy}
+				{#if gift.state === 'available' && !archived}<button
+						class="compact"
+						disabled={!enabled}
+						onclick={() => send('reserve')}>Reserve for me</button
+					>{/if}
+				{#if gift.state === 'allocated'}
+					<label
+						>Actual GBP spend (optional)<input
+							aria-label="Actual GBP spend (optional)"
+							inputmode="decimal"
+							placeholder="Leave blank to use estimate"
+							bind:value={actual}
+							disabled={!enabled}
+						/></label
+					>
+					<button class="compact" disabled={!enabled} onclick={() => send('purchase')}
+						>Mark purchased</button
+					>
+					{#if !administrator && gift.allocationSource === 'self'}<button
+							class="secondary compact"
+							disabled={!enabled}
+							onclick={() => send('release')}>Release reservation</button
+						>{/if}
+				{/if}
+			{/if}
+			{#if !mayBuy && gift.state === 'allocated'}<p class="hint">
+					Ask the administrator to record a purchase or change your assignment.
+				</p>{/if}
+			{#if administrator}
+				{#if gift.state === 'purchased'}<button
+						class="secondary compact"
+						disabled={!enabled}
+						onclick={() => send('undo')}>Undo purchase</button
+					>{:else}
+					{#if !archived}<label
+							>Assign to<select bind:value={buyerId} disabled={!enabled}
+								><option value="">Choose a person</option>{#each members as person}<option
+										value={person.id}>{person.name} ({person.role})</option
+									>{/each}</select
+							></label
+						><button
+							class="secondary compact"
+							disabled={!enabled || !buyerId}
+							onclick={() => send('assign')}
+							>{gift.state === 'allocated' ? 'Reassign gift' : 'Assign gift'}</button
+						>{/if}
+					{#if gift.state === 'allocated'}<button
+							class="secondary compact"
+							disabled={!enabled}
+							onclick={() => send('clear')}>Clear allocation</button
+						>{/if}
+				{/if}
+			{/if}
+			{#if administrator && history.length}<details>
+					<summary>Allocation history</summary>
+					<ol>
+						{#each history as record}<li>
+								{record.action} · {record.fromState} → {record.toState} · {new Date(
+									record.createdAt
+								).toLocaleString('en-GB')}
+							</li>{/each}
+					</ol>
+				</details>{/if}
+			{#if message}<p class="error hint" role="alert">{message}</p>{/if}
+		</div>
+	</details>
 </div>
 
 <style>
@@ -231,6 +247,18 @@
 		flex-wrap: wrap;
 		align-items: center;
 		gap: 0.6rem;
+	}
+	.action-controls.expanded > summary {
+		display: none;
+	}
+	.action-buttons {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.6rem;
+	}
+	.action-controls > summary {
+		font-size: 0.8rem;
 	}
 	details {
 		width: 100%;
