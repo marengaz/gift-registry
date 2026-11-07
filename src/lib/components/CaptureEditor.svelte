@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import MetadataPrefill from './MetadataPrefill.svelte';
+	import BrowserCaptureHelp from './BrowserCaptureHelp.svelte';
 	import type { CaptureDraft, GiftList } from '#lib/catalogue-types.ts';
 	let {
 		draft = $bindable(),
@@ -98,6 +99,7 @@
 			/></label
 		>
 		{#if !editing}<MetadataPrefill bind:draft bind:photos disabled={locked || busy} />{/if}
+		{#if !editing}<BrowserCaptureHelp />{/if}
 		<label
 			>Title <input
 				bind:value={draft.title}
@@ -113,6 +115,7 @@
 					onchange={(event) => {
 						const input = event.target as HTMLInputElement;
 						photos = Array.from(input.files ?? []);
+						if (draft.browserCapture) draft.browserCapture.imageUrl = '';
 						input.value = '';
 					}}
 				/>
@@ -127,6 +130,7 @@
 								class="quiet"
 								aria-label={`Remove ${picture.name}`}
 								onclick={() => {
+									if (draft.browserCapture) draft.browserCapture.imageUrl = '';
 									photos = photos.filter((_, position) => position !== index);
 								}}>Remove photo</button
 							>

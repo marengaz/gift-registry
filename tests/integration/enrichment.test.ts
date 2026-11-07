@@ -3,6 +3,66 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { extractMetadata } from '../../src/lib/server/enrichment/metadata';
 
 describe('retailer evidence', () => {
+	it.each([
+		[
+			'https://www.lego.com/en-gb/product/police-car-60312',
+			{
+				name: 'Police Car',
+				image: 'https://images.example/car.png',
+				offers: { price: 8.99, priceCurrency: 'GBP', seller: { name: 'LEGO' } }
+			},
+			899
+		],
+		[
+			'https://www.theworks.co.uk/p/role-play-toys/doctor-set/5052089328631.html',
+			{
+				name: 'Doctor Role Play Set',
+				description: null,
+				image: ['https://images.example/doctor.jpg'],
+				offers: { url: {}, price: '7.00', priceCurrency: 'GBP' }
+			},
+			700
+		],
+		[
+			'https://www.johnlewis.com/castle-building-toy/p115349819',
+			{
+				name: 'Cinderella Animal Friends Castle',
+				image: 'https://images.example/castle',
+				offers: { price: '18.74', priceCurrency: 'GBP' }
+			},
+			1874
+		]
+	])('retains the observed public product shape at %s', (url, product, priceMinor) => {
+		const result = extractMetadata(
+			`<script type="application/ld+json">${JSON.stringify({ '@type': 'Product', ...product })}</script>`,
+			url,
+			123
+		)[0];
+		expect(result).toMatchObject({
+			title: product.name,
+			sourceUrl: url,
+			retrievedAt: 123,
+			offer: { url, priceMinor, currency: 'GBP', fromPrice: false }
+		});
+		expect(result.imageUrl).toMatch(/^https:\/\/images.example\//);
+	});
+	it('imports The Entertainer product image and current price without choosing basket or previous prices', () => {
+		const html =
+			'<title>Stitch | The Entertainer</title><meta name="description" content="A buildable character"><div class="mini-cart-price">£0.00</div><h1>LEGO Disney Stitch And Scrump 43296</h1><div class="js-pdp-price"><span class="price"><span>£50.00</span></span><span class="wasPrice">£60.00</span></div><div class="image-gallery__image"><img src="/medias/582531-primary.jpg"></div>';
+		expect(
+			extractMetadata(html, 'https://www.thetoyshop.com/construction/stitch/p/582531', 123)[0]
+		).toMatchObject({
+			title: 'LEGO Disney Stitch And Scrump 43296',
+			description: 'A buildable character',
+			imageUrl: 'https://www.thetoyshop.com/medias/582531-primary.jpg',
+			source: 'retailer-page',
+			offer: { retailer: 'The Entertainer', priceMinor: 5000, currency: 'GBP', fromPrice: false }
+		});
+		expect(extractMetadata(html, 'https://unrelated.example/product', 123)[0].offer).toBeNull();
+		expect(
+			extractMetadata(html, 'https://www.thetoyshop.com/brands/lego', 123)[0].offer
+		).toBeNull();
+	});
 	it('reads the product photo and exact active GBP price from an Amazon UK page without Open Graph offers', () => {
 		const html =
 			'<title>Amazon.co.uk</title><span id="productTitle">Tile tracker two pack</span><div id="corePriceDisplay_desktop_feature_div"><span class="a-price"><span class="a-offscreen"> </span></span></div><div id="corePrice_feature_div"><span class="a-price a-text-price"><span class="a-offscreen">£49.99</span></span><span class="a-price"><span class="a-offscreen">£38.92</span></span></div><img id="landingImage" data-old-hires="https://m.media-amazon.com/images/I/tracker.jpg">';

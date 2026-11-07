@@ -4,6 +4,8 @@ A private family present catalogue with one administrator, Google sign-in, reusa
 
 The app is an installable website. Android Chrome can share links and photos into it; relatives can use an ordinary browser. Retailer metadata fills available fields. Optional Google Vision matching suggests buying pages for confirmation and stays disabled until configured and enabled within an allowance.
 
+For shops that block link lookups, use the free **Save gift** browser button. See [Save ideas from shops](docs/retailer-imports.md) for setup and the live retailer checks.
+
 ## Run locally
 
 Use Node 26.13.0 or a later Node 26 release. Install the locked dependencies, then create your local settings:

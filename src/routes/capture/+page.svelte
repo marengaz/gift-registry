@@ -2,6 +2,8 @@
 	import { onMount } from 'svelte';
 	import { liveQuery } from 'dexie';
 	import { page } from '$app/state';
+	import { goto } from '$app/navigation';
+	import { importBrowserCapture } from '#lib/client/browser-capture.ts';
 	import CaptureEditor from '#lib/components/CaptureEditor.svelte';
 	import { emptyDraft, captureTitle } from '#lib/catalogue-types.ts';
 	import {
@@ -16,6 +18,7 @@
 	let loading = $state(true);
 	let busy = $state(false);
 	let message = $state('');
+	let browserImportError = $state('');
 	let storage = $state('');
 	let current = $state<LocalDraft | undefined>();
 	let records = $state<LocalDraft[]>([]);
@@ -331,6 +334,19 @@
 			}
 		});
 		void (async () => {
+			if (page.url.hash.startsWith('#gift=')) {
+				try {
+					const imported = await importBrowserCapture(page.url.hash);
+					await goto(`/capture?draft=${encodeURIComponent(imported.id)}`, { replace: true });
+				} catch (error) {
+					browserImportError =
+						error instanceof Error && error.name === 'QuotaExceededError'
+							? 'Device storage is full. Keep this page open, free storage, then refresh to keep the browser capture.'
+							: error instanceof Error
+								? error.message
+								: 'This browser capture could not be kept. Open the shop and choose Save gift again.';
+				}
+			}
 			try {
 				context = await draftStore.current();
 				requestedListPending = page.url.searchParams.get('list');
@@ -373,6 +389,7 @@
 	});
 	async function save() {
 		if (busy || blocked || !editorReady) return;
+		if (draft.browserCapture) draft.browserCapture.pendingReview = false;
 		firstIdentityPending = false;
 		const version = ++openVersion;
 		const ownerId = formOwner;
@@ -505,6 +522,7 @@
 			</p>
 		</div>
 	</div>
+	{#if browserImportError}<p class="notice error" role="alert">{browserImportError}</p>{/if}
 	{#if loading}<p role="status">Opening your capture drafts…</p>
 	{:else if blocked}<section class="panel">
 			<h2>Unfinished idea kept for its author</h2>

@@ -21,6 +21,12 @@ export type CaptureDraft = {
 	entryEstimates: Record<string, string>;
 	labels: string;
 	offers: ShoppingDraft[];
+	browserCapture?: {
+		sourceUrl: string;
+		imageUrl: string;
+		capturedAt: number;
+		pendingReview: boolean;
+	};
 };
 export const emptyDraft = (): CaptureDraft => ({
 	title: '',

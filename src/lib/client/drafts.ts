@@ -276,6 +276,7 @@ export class DraftStore extends Dexie {
 			if (
 				!record ||
 				record.status === 'saved' ||
+				record.draft.browserCapture?.pendingReview === true ||
 				(record.leaseUntil ?? 0) > Date.now() ||
 				(!exclusive && !!record.editorToken)
 			)

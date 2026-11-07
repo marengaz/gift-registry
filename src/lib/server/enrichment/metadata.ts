@@ -112,6 +112,43 @@ export function extractMetadata(
 		};
 	});
 	if (suggestions.length) return suggestions;
+	if (
+		['thetoyshop.com', 'www.thetoyshop.com'].includes(new URL(sourceUrl).hostname) &&
+		/\/p\/\d+\/?$/.test(new URL(sourceUrl).pathname)
+	) {
+		const title = plain($('h1').first().text());
+		const imageUrl = image($('.image-gallery__image img').first().attr('src'), sourceUrl);
+		if (title) {
+			const priceText = plain($('.js-pdp-price .price').first().text());
+			const amount = priceText?.match(/^£\s*((?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{1,2})?)$/)?.[1];
+			let priceMinor: number | null = null;
+			if (amount) {
+				try {
+					priceMinor = parsePriceMinor(amount.replaceAll(',', ''), 'GBP');
+				} catch {}
+			}
+			return [
+				{
+					title,
+					description: plain(meta('description')),
+					variant: null,
+					imageUrl,
+					sourceUrl,
+					retrievedAt,
+					source: 'retailer-page',
+					offer: {
+						url: sourceUrl,
+						retailer: 'The Entertainer',
+						priceMinor,
+						currency: amount ? 'GBP' : null,
+						priceText,
+						fromPrice: false
+					},
+					uncertainty: ['Check the exact set and current price at The Entertainer.']
+				}
+			];
+		}
+	}
 	if (['amazon.co.uk', 'www.amazon.co.uk'].includes(new URL(sourceUrl).hostname)) {
 		const productTitle = plain($('#productTitle').text());
 		if (productTitle) {

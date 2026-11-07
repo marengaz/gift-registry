@@ -50,7 +50,7 @@ test.afterAll(async () => {
 	rmSync(directory, { recursive: true, force: true });
 });
 
-async function delayImageBody(page: Page) {
+async function delayImageBody(page: Page, browserCapture = false) {
 	await page.addInitScript(() => {
 		const original = window.fetch.bind(window);
 		const state = window as Window & {
@@ -98,8 +98,21 @@ async function delayImageBody(page: Page) {
 			}
 		})
 	);
-	await page.goto(origin + '/capture');
-	await page.getByLabel('Product link', { exact: true }).fill('https://shop.example/train');
+	if (browserCapture) {
+		const capture = {
+			version: 1,
+			sourceUrl: 'https://www.smythstoys.com/uk/en-gb/toy/p/266502',
+			title: 'Browser train',
+			imageUrl: 'https://shop.example/train.webp',
+			currency: 'GBP',
+			priceText: '20.00',
+			fromPrice: false
+		};
+		await page.goto(origin + '/capture#gift=' + encodeURIComponent(JSON.stringify(capture)));
+	} else {
+		await page.goto(origin + '/capture');
+		await page.getByLabel('Product link', { exact: true }).fill('https://shop.example/train');
+	}
 	await expect
 		.poll(() =>
 			page.evaluate(() => (window as Window & { imageBodyReading?: boolean }).imageBodyReading)
@@ -154,6 +167,50 @@ test('does not attach an earlier lookup image to a replacement draft with the sa
 		await finishImageBody(page);
 		await expect(page.getByLabel('Title', { exact: true })).toHaveValue('Another idea');
 		await expect(page.getByText('retailer-image.webp', { exact: false })).toHaveCount(0);
+	} finally {
+		await context.close();
+	}
+});
+
+test('keeps a manual photo when a captured browser image body arrives later', async ({
+	browser
+}) => {
+	const context = await browser.newContext({ extraHTTPHeaders: { 'x-forwarded-proto': 'http' } });
+	const page = await context.newPage();
+	try {
+		await delayImageBody(page, true);
+		await page.getByLabel('Photos').setInputFiles({
+			name: 'chosen-browser-photo.png',
+			mimeType: 'image/png',
+			buffer: Buffer.from([4, 5, 6])
+		});
+		await finishImageBody(page);
+		await expect(page.getByText('Copying shop photo…', { exact: true })).toHaveCount(0);
+		await expect(page.getByText('chosen-browser-photo.png', { exact: false })).toBeVisible();
+		await expect(page.getByText('browser-image.webp', { exact: false })).toHaveCount(0);
+	} finally {
+		await context.close();
+	}
+});
+
+test('does not attach a browser photo to a replacement draft with the same source link', async ({
+	browser
+}) => {
+	const context = await browser.newContext({ extraHTTPHeaders: { 'x-forwarded-proto': 'http' } });
+	const page = await context.newPage();
+	try {
+		await delayImageBody(page, true);
+		await page.getByRole('button', { name: 'Save on this device', exact: true }).click();
+		await page.getByRole('button', { name: 'Add another idea', exact: true }).click();
+		await expect(page.getByLabel('Title', { exact: true })).toHaveValue('');
+		await page.getByLabel('Title', { exact: true }).fill('Replacement browser idea');
+		await page
+			.getByLabel('Product link', { exact: true })
+			.fill('https://www.smythstoys.com/uk/en-gb/toy/p/266502');
+		await finishImageBody(page);
+		await expect(page.getByText('Copying shop photo…', { exact: true })).toHaveCount(0);
+		await expect(page.getByLabel('Title', { exact: true })).toHaveValue('Replacement browser idea');
+		await expect(page.getByText('browser-image.webp', { exact: false })).toHaveCount(0);
 	} finally {
 		await context.close();
 	}
