@@ -24,25 +24,27 @@ For each source below, choose its Share action and select **Family gifts**. Reco
 | Camera/gallery shop photo  | The original photo name is shown and can be saved, including the phone's actual format and size.  | Not run |
 | Text or message            | Shared text is retained even without a URL.                                                       | Not run |
 
-A share is first saved on the device without an account. Sign in if needed, choose **Adopt with my signed-in account**, select lists, and save. Opening a shared draft must not silently upload it as the person who was previously signed in. Photo-only drafts need an editable title before submission.
+A share is first kept on the device without an account. Check **Adding as**, select lists, and choose **Save idea** to confirm the account and publish. Sign in first if needed; signing in alone never publishes the share. **Keep for later** retains an unfinished draft without sending it. Photo-only drafts can use the editable fallback name **Photo idea**.
+
+For a blocked product link, keep the idea, open the shop and take a screenshot. Share the screenshot to Family gifts and choose **Add to** the existing idea when prompted. Confirm the original link, list selections and edits survive, then optionally crop the image and choose **Fill from image**. The image must not be sent to Google before that explicit action. Choose **Start a new idea** when it belongs to a different gift.
 
 JPEG, PNG and WebP are the recommended formats. AVIF and HEIC/HEIF may be received, but the server's image decoder still needs to support the actual file. A rejected or oversized image must keep its source recoverable; use a JPEG copy if needed. Photos are limited to 12 MB and 30 megapixels on the server.
 
 ## Flight mode and app termination
 
-1. While online, open Add idea with the correct account and lists. Record whether persistent storage was granted or remains best effort.
+1. While online, open Add idea and wait for **Adding as** to show the correct account, its lists and an enabled **Save idea** action. Record whether persistent storage was granted or remains best effort.
 2. Turn on flight mode, ensuring Wi-Fi is also off. Close the app and reopen it from its installed icon.
 3. Add a title, a shop photo and one permitted list. Choose **Save on this device**. Continue only after it confirms that local save.
 4. Fully dismiss the app from recent applications. Reopen it while still offline. Open the saved draft and confirm its title, photo and list remain.
 5. Share a photo from the gallery while offline. Confirm that it opens as a new unbound draft. Do not confuse it with an already synchronised idea.
-6. Restore connectivity. Adopt the unbound share explicitly if applicable and save it. Confirm that pending ideas become acknowledged by the server and each appears once in the catalogue.
+6. Restore connectivity. Confirm that previously submitted ideas become acknowledged by the server and each appears once in the catalogue. Unfinished drafts and newly received shares must remain unpublished until **Save idea** is chosen with the correct account shown.
 7. Repeat after restarting the phone. Do not clear Chrome or application storage: clearing browser data deliberately removes local drafts.
 
 If storage is full or unavailable, the app must say that the share has **not** been saved. Keep the original source and free storage before trying again. Browsers can evict best-effort storage under pressure; synchronise when connected.
 
 ## Accounts, updates and recovery
 
-1. Save a draft offline, reconnect and choose Sign out. Confirm that synchronise, discard and cancel are explicit choices, and that cancel keeps the draft.
+1. Keep an unfinished draft, then choose Sign out. Confirm that **Keep drafts and sign out**, **Discard drafts and sign out**, and **Cancel** behave explicitly. **Send queued ideas, then sign out** must send only previously submitted ideas. Cancel restores the editor; keeping drafts leaves them available to their original author after signing back in.
 2. Sign in as a different invited account. Confirm that the first account's unsynchronised draft is not uploaded as the second account.
 3. Return to its author and retry. An uncertain response must reuse the original operation rather than create a duplicate.
 4. Leave an offline draft pending while deploying an application update. Close existing app windows, reopen online, then check that the draft and photo survive the service-worker update.

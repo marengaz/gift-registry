@@ -66,6 +66,14 @@ The public liveness endpoint, `/health/live`, returns a boolean without resolvin
 
 The share fallback deliberately accepts a cross-origin `POST /share` without using cookies or creating server records. The global request hook checks the origin of every other mutation, including authentication endpoints. SvelteKit's generic form check is delegated to that hook so the share recovery page can run.
 
+## Optional Gemini help
+
+The existing retailer reader remains the first pass. Gemini can interpret incomplete accessible content and explicitly submitted images or text. Set `GEMINI_API_KEY`, `GEMINI_MODEL=gemini-3.5-flash-lite`, `GEMINI_MONTHLY_BUDGET_USD=2.00` and `GEMINI_EVAL_BUDGET_USD=0.25` in the server environment. Compose passes these to the app, which makes the Gemini requests; the existing Vision worker does not need this key.
+
+Enable AI help in **Identification**. The existing administrator allowance, Gemini environment limit and evaluation sub-limit are all enforced. Gemini requests reserve US$0.02 conservatively, with failed or uncertain dispatches still counted. Gemini and Vision share the administrator's overall allowance. Keep the key out of source control and browser code. Google subscription credits do not remove the need for an active provider billing setup.
+
+See [Save ideas from shops](retailer-imports.md) for screenshots, unfinished drafts, extraction controls and the opt-in development evaluation harness. The additive Gemini reservation migration is applied on startup and is included in normal SQLite backups.
+
 ## Optional personal image identification
 
 Ordinary capture and retailer metadata work without Vision credentials. To enable explicit photo matching:
@@ -81,7 +89,7 @@ Ordinary capture and retailer metadata work without Vision credentials. To enabl
    ```
 
 4. Recreate app and worker with `docker compose up -d`. Only the worker receives the read-only credential mount. The JSON credential's `project_id` must match `VISION_PROJECT_ID`; ambient Google credentials are not used.
-5. In **Identification**, review the monthly allowance and enable paid image identification. Make a one-image check only when you intend to spend its admitted allowance, and record the result separately.
+5. In **Identification**, review the shared monthly allowance and enable AI help and paid image identification. Make a one-image check only when you intend to spend its admitted allowance, and record the result separately.
 
 The default US$1 UTC-month allowance counts every image at US$0.0035, admitting at most 285 requests even where a free tier applies. A timeout or worker crash after possible dispatch keeps its reservation. Paid requests are not retried automatically. This controls requests admitted by this application, not the project's entire provider bill. Use Google billing alerts as additional information; they are not this application's hard admission check. Recheck the [Vision price](https://cloud.google.com/vision/pricing) before changing the conservative unit cost.
 

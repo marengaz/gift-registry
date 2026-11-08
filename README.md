@@ -4,7 +4,7 @@ A private family present catalogue with one administrator, Google sign-in, reusa
 
 The app is an installable website. Android Chrome can share links and photos into it; relatives can use an ordinary browser. Retailer metadata fills available fields. Optional Google Vision matching suggests buying pages for confirmation and stays disabled until configured and enabled within an allowance.
 
-For shops that block link lookups, use the free **Save gift** browser button. See [Save ideas from shops](docs/retailer-imports.md) for setup and the live retailer checks.
+The existing retailer reader runs first, including Amazon-specific handling. Optional Gemini help fills missing details from readable pages, selected screenshots and pasted text. For blocked shops, add a screenshot to the same idea. See [Save ideas from shops](docs/retailer-imports.md) for the workflow and prior live retailer checks.
 
 ## Run locally
 
