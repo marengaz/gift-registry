@@ -748,7 +748,7 @@
 			<section class="panel" aria-label="Continue an existing idea">
 				<h2>Use this with an existing idea?</h2>
 				<p>Your screenshot is kept. Choose the idea it belongs to, or start a new idea.</p>
-				{#each continuationTargets as target}<div class="draft-row">
+				{#each continuationTargets as target (target.id)}<div class="draft-row">
 						<DraftPreview record={target} />
 						<div>
 							<button
@@ -832,7 +832,7 @@
 	{#if records.length || imports.length}<section class="panel">
 			<h2>Drafts on this device</h2>
 			<ul class="draft-list">
-				{#each [...records, ...imports] as record}<li>
+				{#each [...records, ...imports] as record (record.id)}<li>
 						<DraftPreview {record} />
 						<div>
 							<button class="quiet" onclick={() => open(record.id)}

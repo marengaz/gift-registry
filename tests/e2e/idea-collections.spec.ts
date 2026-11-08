@@ -6,11 +6,14 @@ import { join } from 'node:path';
 import { makeSignature } from 'better-auth/crypto';
 import { fixture } from '../integration/identity-fixture';
 import { acceptInvitation, createInvitation } from '../../src/lib/server/invitations';
+import sharp from 'sharp';
+import { prepareMedia } from '../../src/lib/server/media';
 
 const origin = 'http://localhost:4198';
 const secret = 'test-only-collection-secret-8d10a957acf165810';
 let directory: string;
 let server: ChildProcess;
+let picture: Buffer;
 test.beforeAll(async () => {
 	directory = mkdtempSync(join(tmpdir(), 'gift-collections-'));
 	const model = fixture();
@@ -37,6 +40,21 @@ test.beforeAll(async () => {
 		('puzzle-entry','puzzle','visible',1500,'purchased','guest','self','guest',1,2),
 		('hidden-entry','hidden','visible',5000,'allocated','other','administrator','admin',1,NULL);
 	`);
+	picture = await sharp({ create: { width: 80, height: 60, channels: 3, background: '#79a' } })
+		.png()
+		.toBuffer();
+	const prepared = await prepareMedia(
+		[new File([new Uint8Array(picture)], 'train.png', { type: 'image/png' })],
+		{
+			mediaRoot: join(directory, 'media')
+		}
+	);
+	const photo = prepared.media[0];
+	model.connection.sqlite
+		.prepare(
+			'INSERT INTO media(id,product_id,storage_path,mime_type,byte_size,original_name) VALUES(?,?,?,?,?,?)'
+		)
+		.run(photo.id, 'train', photo.storagePath, photo.mimeType, photo.byteSize, photo.originalName);
 	await model.connection.sqlite.backup(join(directory, 'test.sqlite'));
 	model.connection.close();
 	server = spawn(process.execPath, ['build/index.js'], {
@@ -188,6 +206,121 @@ test('combines catalogue filters and clears them, and searches the unlisted inbo
 		await page.getByRole('button', { name: 'Find ideas', exact: true }).click();
 		await expect(page.getByRole('article')).toHaveCount(1);
 		await expect(page.getByRole('heading', { name: 'Rocket idea', exact: true })).toBeVisible();
+	} finally {
+		await context.close();
+	}
+});
+
+test('loads real thumbnails in cards and compact rows on lists, my gifts and the catalogue', async ({
+	browser
+}) => {
+	for (const path of ['/lists/visible', '/my-gifts', '/catalogue']) {
+		const context = await browser.newContext({
+			viewport: { width: 390, height: 844 },
+			extraHTTPHeaders: { 'x-forwarded-proto': 'http' }
+		});
+		await signIn(context, path === '/catalogue' ? 'admin' : 'guest');
+		const page = await context.newPage();
+		try {
+			await page.goto(origin + path);
+			for (const mode of ['Cards', 'Compact list']) {
+				await page.getByRole('button', { name: mode, exact: true }).click();
+				const photos = page.locator('.card-photo img[alt="Toy train"]');
+				expect(await photos.count()).toBeGreaterThan(0);
+				for (const photo of await photos.all()) {
+					await photo.scrollIntoViewIfNeeded();
+					await expect
+						.poll(() =>
+							photo.evaluate(
+								(image: HTMLImageElement) => image.complete && image.naturalWidth === 80
+							)
+						)
+						.toBe(true);
+					const bounds = await photo.boundingBox();
+					expect(bounds?.width).toBeGreaterThan(0);
+					expect(bounds?.height).toBeGreaterThan(0);
+				}
+			}
+		} finally {
+			await context.close();
+		}
+	}
+});
+
+test('keeps the device-draft thumbnail visible after saving and reloading', async ({ browser }) => {
+	const context = await browser.newContext({ extraHTTPHeaders: { 'x-forwarded-proto': 'http' } });
+	await signIn(context, 'admin');
+	const page = await context.newPage();
+	try {
+		await page.goto(origin + '/capture');
+		await expect(page.getByText('Adding as admin', { exact: true })).toBeVisible();
+		await page.getByLabel('Title', { exact: true }).fill('Device thumbnail train');
+		await page
+			.getByLabel('Photos', { exact: false })
+			.setInputFiles({ name: 'device-train.png', mimeType: 'image/png', buffer: picture });
+		await page.getByRole('button', { name: 'Keep for later', exact: true }).click();
+		const row = page.locator('.draft-list li').filter({ hasText: 'Device thumbnail train' });
+		await expect(row.locator('img')).toBeVisible();
+		await expect
+			.poll(() =>
+				row
+					.locator('img')
+					.evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth === 80)
+			)
+			.toBe(true);
+		await row.getByRole('button', { name: 'Device thumbnail train', exact: true }).click();
+		await page.getByRole('button', { name: 'Save idea', exact: true }).click();
+		await expect(page.getByRole('heading', { name: 'Idea saved', exact: true })).toBeVisible();
+		await expect(row).toContainText('Saved to family catalogue');
+		await expect(row.locator('img')).toBeVisible();
+		await expect
+			.poll(() =>
+				row
+					.locator('img')
+					.evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth === 80)
+			)
+			.toBe(true);
+		await page.reload();
+		await expect(row.locator('img')).toBeVisible();
+		await expect
+			.poll(() =>
+				row
+					.locator('img')
+					.evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth === 80)
+			)
+			.toBe(true);
+		await page.goto(origin + '/capture');
+		await expect
+			.poll(() =>
+				row
+					.locator('img')
+					.evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth === 80)
+			)
+			.toBe(true);
+		let repeatedLookups = 0;
+		page.on('request', (request) => {
+			if (
+				request.method() === 'GET' &&
+				new URL(request.url()).pathname.startsWith('/api/products/')
+			)
+				repeatedLookups++;
+		});
+		await page.getByLabel('Title', { exact: true }).fill('Another unfinished idea');
+		await expect(
+			page
+				.locator('.draft-list')
+				.getByRole('button', { name: 'Another unfinished idea', exact: true })
+		).toBeVisible();
+		await expect(row.locator('img')).toBeVisible();
+		expect(repeatedLookups).toBe(0);
+		await page.getByLabel('Title', { exact: true }).fill('Another unfinished idea edited');
+		await expect(
+			page
+				.locator('.draft-list')
+				.getByRole('button', { name: 'Another unfinished idea edited', exact: true })
+		).toBeVisible();
+		await expect(row.locator('img')).toBeVisible();
+		expect(repeatedLookups).toBe(0);
 	} finally {
 		await context.close();
 	}

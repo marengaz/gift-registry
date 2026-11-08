@@ -2,26 +2,46 @@
 	import { draftStore, type LocalDraft } from '#lib/client/drafts.ts';
 	let { record }: { record: LocalDraft } = $props();
 	let source = $state('');
+	const draftId = $derived(record.id);
+	const ownerId = $derived(record.ownerId);
+	const updatedAt = $derived(record.updatedAt);
+	const productId = $derived(record.status === 'saved' ? record.ack?.productId : undefined);
 	$effect(() => {
-		const id = record.id,
-			owner = record.ownerId;
-		const revision = record.updatedAt;
+		const id = draftId,
+			owner = ownerId;
+		const revision = updatedAt;
+		const savedProduct = productId;
 		let disposed = false;
 		let objectUrl = '';
+		const controller = new AbortController();
+		const current = async () => {
+			const context = await draftStore.current();
+			return !disposed && (!owner || context?.ownerId === owner) && record.updatedAt === revision;
+		};
 		source = '';
 		void draftStore
 			.firstPhoto(id, owner)
 			.then(async (file) => {
-				if (disposed || !file) return;
-				const context = await draftStore.current();
-				if (disposed || (owner && context?.ownerId !== owner) || record.updatedAt !== revision)
-					return;
-				objectUrl = URL.createObjectURL(file);
-				source = objectUrl;
+				if (!(await current())) return;
+				if (file) {
+					objectUrl = URL.createObjectURL(file);
+					source = objectUrl;
+				} else if (savedProduct && owner) {
+					const response = await fetch('/api/products/' + encodeURIComponent(savedProduct), {
+						cache: 'no-store',
+						signal: AbortSignal.any([controller.signal, AbortSignal.timeout(5000)])
+					});
+					if (!response.ok) return;
+					const product = await response.json();
+					const imageId = product.media?.[0]?.id;
+					if (typeof imageId === 'string' && (await current()))
+						source = '/api/media/' + encodeURIComponent(imageId);
+				}
 			})
 			.catch(() => {});
 		return () => {
 			disposed = true;
+			controller.abort();
 			if (objectUrl) URL.revokeObjectURL(objectUrl);
 		};
 	});
