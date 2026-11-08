@@ -10,6 +10,8 @@ export type Identity = {
 	lists: GiftList[];
 };
 export type ShoppingDraft = { url: string; retailer: string; price: string; currency: string };
+export type CaptureEditedField =
+	'title' | 'description' | 'variant' | 'estimate' | 'offers' | 'photos';
 export type CaptureDraft = {
 	title: string;
 	description: string;
@@ -21,6 +23,7 @@ export type CaptureDraft = {
 	entryEstimates: Record<string, string>;
 	labels: string;
 	offers: ShoppingDraft[];
+	editedFields?: CaptureEditedField[];
 	browserCapture?: {
 		sourceUrl: string;
 		imageUrl: string;
