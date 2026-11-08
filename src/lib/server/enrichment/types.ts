@@ -5,7 +5,7 @@ export type ProductSuggestion = {
 	imageUrl: string | null;
 	sourceUrl: string;
 	retrievedAt: number;
-	source: 'json-ld' | 'open-graph' | 'retailer-page' | 'vision-page';
+	source: 'json-ld' | 'open-graph' | 'retailer-page' | 'vision-page' | 'gemini';
 	offer: {
 		url: string;
 		retailer: string | null;

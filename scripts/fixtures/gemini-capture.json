@@ -1,0 +1,78 @@
+{
+	"version": 1,
+	"purpose": "Synthetic non-family extraction fixtures. These do not test live retailer fetching or claim current shop prices.",
+	"retailerContexts": [
+		"Amazon UK",
+		"Smyths",
+		"The Entertainer",
+		"Argos",
+		"LEGO UK",
+		"Hamleys",
+		"The Works",
+		"Currys",
+		"Etsy",
+		"John Lewis"
+	],
+	"cases": [
+		{
+			"id": "current-price-not-cart-or-rrp",
+			"kind": "text",
+			"sourceUrl": "https://www.amazon.co.uk/gift-evaluation-fixture",
+			"text": "Wooden stacking train, blue. Current product price £19.99. Was £25.99. Basket £0.00. The current offer is for the blue wooden stacking train.",
+			"expected": { "titleContains": "train", "priceMinor": 1999, "currency": "GBP" }
+		},
+		{
+			"id": "smyths-style-screenshot",
+			"kind": "image",
+			"sourceUrl": "https://www.smythstoys.com/gift-evaluation-fixture",
+			"imageLines": ["WOODEN TRAIN", "Blue stacking toy", "Price GBP 12.50"],
+			"expected": { "titleContains": "train", "priceMinor": 1250, "currency": "GBP" }
+		},
+		{
+			"id": "from-price",
+			"kind": "text",
+			"sourceUrl": "https://www.etsy.com/gift-evaluation-fixture",
+			"text": "Personalised wooden train. From £14.99. Price changes with the selected name and size; no size has been selected.",
+			"expected": { "titleContains": "train", "priceMinor": null }
+		},
+		{
+			"id": "foreign-currency",
+			"kind": "text",
+			"sourceUrl": "https://www.lego.com/gift-evaluation-fixture",
+			"text": "Toy police car. Current exact product price: JPY 1500. One car, no selectable variants.",
+			"expected": { "titleContains": "car", "priceMinor": 1500, "currency": "JPY" }
+		},
+		{
+			"id": "multiple-products-screenshot",
+			"kind": "image",
+			"sourceUrl": "https://www.johnlewis.com/gift-evaluation-fixture",
+			"imageLines": [
+				"GIFT IDEAS",
+				"Wooden train GBP 19.99",
+				"Teddy bear GBP 7.99",
+				"No item selected"
+			],
+			"expected": { "priceMinor": null, "ambiguous": true }
+		},
+		{
+			"id": "social-post-no-price",
+			"kind": "text",
+			"sourceUrl": "https://www.instagram.com/gift-evaluation-fixture",
+			"text": "A video shows a wooden stacking train. The exact brand, product model and price are not visible. Keep this as an idea for later.",
+			"expected": { "priceMinor": null }
+		},
+		{
+			"id": "missing-currency",
+			"kind": "text",
+			"sourceUrl": "https://www.theworks.co.uk/gift-evaluation-fixture",
+			"text": "Dinosaur toy figure. Displayed number 14.99. No currency symbol, currency code or other currency information appears in the source.",
+			"expected": { "titleContains": "dinosaur", "priceMinor": null }
+		},
+		{
+			"id": "unlabelled-photo-no-price",
+			"kind": "image",
+			"imageLines": [],
+			"expected": { "priceMinor": null }
+		}
+	]
+}

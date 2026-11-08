@@ -35,11 +35,19 @@ export function updateIdentificationSettings(connection: DatabaseConnection, inp
 export function allowanceSummary(connection: DatabaseConnection, now = Date.now()) {
 	const settings = getIdentificationSettings(connection);
 	const month = new Date(now).toISOString().slice(0, 7);
-	const reservedMicrodollars = connection.db
+	const visionReservedMicrodollars = connection.db
 		.select({ total: sql<number>`coalesce(sum(${allowanceReservations.amountMicrodollars}),0)` })
 		.from(allowanceReservations)
 		.where(eq(allowanceReservations.month, month))
 		.get()!.total;
+	const geminiReservedMicrodollars = (
+		connection.sqlite
+			.prepare(
+				'SELECT coalesce(sum(reserved_microdollars),0) AS total FROM gemini_capture_requests WHERE month=?'
+			)
+			.get(month) as { total: number }
+	).total;
+	const reservedMicrodollars = visionReservedMicrodollars + geminiReservedMicrodollars;
 	return {
 		...settings,
 		month,
