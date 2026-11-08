@@ -68,7 +68,7 @@ export function parseShare(data: FormData): { draft: CaptureDraft; photos: File[
 }
 export async function importShare(data: FormData, store = draftStore) {
 	const value = parseShare(data);
-	return store.save({ ownerId: null, ...value, submit: false });
+	return store.save({ ownerId: null, ...value, submit: false, incomingShare: true });
 }
 
 export function shareRecoveryResponse(message: string, status = 400) {

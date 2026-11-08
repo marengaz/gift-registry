@@ -7,6 +7,7 @@
 	let choosing = $state(false);
 	let ownerId = $state('');
 	let pending = $state(0);
+	let unfinished = $state(0);
 	let error = $state('');
 	let online = $state(true);
 	let resumeCapture: (() => Promise<void>) | undefined;
@@ -46,6 +47,13 @@
 			pending = ownerId
 				? (await draftStore.list(ownerId)).filter((record) => record.status !== 'saved').length
 				: 0;
+			unfinished = ownerId
+				? (await draftStore.list(ownerId)).filter(
+						(record) =>
+							record.status !== 'saved' &&
+							(record.readyToSync === false || record.draft.browserCapture?.pendingReview === true)
+					).length
+				: 0;
 			online = navigator.onLine;
 			if (pending) choosing = true;
 			else await finish();
@@ -54,6 +62,13 @@
 			ownerId = context?.ownerId ?? '';
 			pending = ownerId
 				? (await draftStore.list(ownerId)).filter((record) => record.status !== 'saved').length
+				: 0;
+			unfinished = ownerId
+				? (await draftStore.list(ownerId)).filter(
+						(record) =>
+							record.status !== 'saved' &&
+							(record.readyToSync === false || record.draft.browserCapture?.pendingReview === true)
+					).length
 				: 0;
 			online = navigator.onLine;
 			if (pending) choosing = true;
@@ -89,7 +104,10 @@
 			if (sync) {
 				await syncDrafts(draftStore, fetch, ownerId);
 				const remaining = (await draftStore.list(ownerId)).filter(
-					(record) => record.status !== 'saved'
+					(record) =>
+						record.status !== 'saved' &&
+						record.readyToSync !== false &&
+						record.draft.browserCapture?.pendingReview !== true
 				);
 				if (remaining.length)
 					throw new Error(
@@ -104,6 +122,18 @@
 				reason instanceof Error
 					? reason.message
 					: 'Sign-out failed. Your remaining drafts are still here.';
+		} finally {
+			busy = false;
+		}
+	}
+	async function keepAndSignOut() {
+		if (busy) return;
+		busy = true;
+		try {
+			await finish();
+		} catch (reason) {
+			error =
+				reason instanceof Error ? reason.message : 'Sign-out failed. Your drafts are still here.';
 		} finally {
 			busy = false;
 		}
@@ -129,9 +159,15 @@
 			{pending === 1 ? 'idea has' : 'ideas have'} not been acknowledged by the server. Choose what to
 			do before signing out.
 		</p>
+		{#if unfinished}<p>
+				{unfinished} unfinished {unfinished === 1 ? 'draft will' : 'drafts will'} stay on this device
+				until you return and choose Save idea.
+			</p>{/if}
 		<div class="choices">
-			<button disabled={busy || !online} onclick={() => choose(true)}
-				>Synchronise, then sign out</button
+			<button disabled={busy || !online || pending === unfinished} onclick={() => choose(true)}
+				>Send queued ideas, then sign out</button
+			><button class="secondary" disabled={busy} onclick={keepAndSignOut}
+				>Keep drafts and sign out</button
 			><button class="secondary" disabled={busy} onclick={() => choose(false)}
 				>Discard drafts and sign out</button
 			><button

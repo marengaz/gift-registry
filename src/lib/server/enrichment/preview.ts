@@ -54,6 +54,7 @@ export function metadataPreview(
 			let suggestions = extractMetadata(html, page.url);
 			let aiMessage = '';
 			let aiAvailable = false;
+			let aiUnavailable = false;
 			if (parsed.data.assist) {
 				const status = getGeminiStatus(connection, dependencies.environment);
 				aiAvailable =
@@ -110,11 +111,13 @@ export function metadataPreview(
 							suggestions = [merged];
 						}
 						aiMessage = result.message;
+						aiUnavailable = !!result.failure;
 					} catch (error) {
 						if (error instanceof AccessError && (error.status === 401 || error.status === 403))
 							throw error;
 						aiMessage =
 							'AI details are unavailable. Keep the imported details, add a screenshot or enter anything you know.';
+						aiUnavailable = true;
 					}
 				} else if (!complete && !aiAvailable) {
 					aiMessage = !status.configured
@@ -127,6 +130,7 @@ export function metadataPreview(
 			return {
 				suggestions,
 				aiAvailable,
+				aiUnavailable,
 				message:
 					aiMessage ||
 					(suggestions.length

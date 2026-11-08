@@ -172,7 +172,7 @@ function counts(title?: string) {
 	}
 }
 
-test('imports Android URL, text and photo shares locally and requires explicit account adoption', async ({
+test('imports Android URL, text and photo shares locally and requires an explicit account-confirmed save', async ({
 	browser
 }) => {
 	const context = await browser.newContext({
@@ -236,18 +236,72 @@ test('imports Android URL, text and photo shares locally and requires explicit a
 		expect(counts('Shared photo train')).toEqual({ products: 0, media: 0, entries: 0 });
 		await signIn(context, 'guest');
 		await page.reload();
-		await expect(
-			page.getByRole('button', { name: 'Adopt with my signed-in account' })
-		).toBeVisible();
+		await expect(page.getByRole('button', { name: 'Save idea', exact: true })).toBeVisible();
 		expect((await records(page)).find((record) => record.id === imported.id)?.ownerId).toBeNull();
 		expect(counts('Shared photo train')).toEqual({ products: 0, media: 0, entries: 0 });
-		await page.getByRole('button', { name: 'Adopt with my signed-in account' }).click();
-		await expect(page.getByRole('checkbox')).toBeVisible();
-		await page.getByRole('checkbox').check();
+		await expect(
+			page.getByRole('checkbox', { name: 'Child · Birthday Birthday', exact: true })
+		).toBeVisible();
+		await page.getByRole('checkbox', { name: 'Child · Birthday Birthday', exact: true }).check();
 		await page.getByRole('button', { name: 'Save idea', exact: true }).click();
 		await expect(page.getByRole('heading', { name: 'Idea saved', exact: true })).toBeVisible();
 		expect(counts('Shared photo train')).toEqual({ products: 1, media: 1, entries: 1 });
 		await page.screenshot({ path: '/private/tmp/gift-share-mobile.png', fullPage: true });
+	} finally {
+		await context.close();
+	}
+});
+
+test('continues one blocked-link idea when its screenshot is shared separately', async ({
+	browser
+}) => {
+	const context = await browser.newContext({
+		viewport: { width: 390, height: 844 },
+		extraHTTPHeaders: { 'x-forwarded-proto': 'http' }
+	});
+	await signIn(context, 'guest');
+	const page = await context.newPage();
+	try {
+		await stubMetadata(context);
+		await initialise(page);
+		await submitShare(page, { url: 'https://www.smythstoys.com/uk/toy/p/266502' });
+		await page.getByLabel('Title', { exact: true }).fill('Console for Luke');
+		await page.getByRole('checkbox', { name: 'Child · Birthday Birthday', exact: true }).check();
+		await page.getByRole('button', { name: 'Keep for later', exact: true }).click();
+		await expect(page.getByText('Kept on this device', { exact: false }).first()).toBeVisible();
+		const original = (await records(page)).find(
+			(record) => record.draft.title === 'Console for Luke'
+		)!;
+		const image = await sharp({
+			create: { width: 80, height: 80, channels: 3, background: '#acf' }
+		})
+			.png()
+			.toBuffer();
+		await submitShare(
+			page,
+			{},
+			{ name: 'console-screenshot.png', type: 'image/png', bytes: [...image] }
+		);
+		await expect(
+			page.getByRole('heading', { name: 'Use this with an existing idea?', exact: true })
+		).toBeVisible();
+		await page.getByRole('button', { name: 'Add to Console for Luke', exact: true }).click();
+		await expect(page.getByLabel('Title', { exact: true })).toHaveValue('Console for Luke');
+		await expect(page.getByLabel('Product link')).toHaveValue(
+			'https://www.smythstoys.com/uk/toy/p/266502'
+		);
+		await expect(
+			page.getByRole('checkbox', { name: 'Child · Birthday Birthday', exact: true })
+		).toBeChecked();
+		await expect(page.getByText('console-screenshot.png', { exact: true })).toBeVisible();
+		const kept = await records(page);
+		expect(kept).toHaveLength(1);
+		expect(kept[0].operationId).toBe(original.operationId);
+		expect(kept[0].ownerId).toBeNull();
+		expect(counts('Console for Luke')).toEqual({ products: 0, media: 0, entries: 0 });
+		await page.getByRole('button', { name: 'Save idea', exact: true }).click();
+		await expect(page.getByRole('heading', { name: 'Idea saved', exact: true })).toBeVisible();
+		expect(counts('Console for Luke')).toEqual({ products: 1, media: 1, entries: 1 });
 	} finally {
 		await context.close();
 	}
@@ -278,9 +332,7 @@ test('reopens the public capture screen offline, keeps a photo and list, then sy
 				.toBuffer()
 		});
 		await page.getByRole('button', { name: 'Save on this device', exact: true }).click();
-		await expect(
-			page.getByRole('heading', { name: 'Saved on this device', exact: true })
-		).toBeVisible();
+		await expect(page.getByRole('heading', { name: 'Waiting to send', exact: true })).toBeVisible();
 		const record = (await records(page)).find(
 			(record) => record.draft.title === 'Flight mode photo gift'
 		)!;

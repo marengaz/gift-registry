@@ -489,7 +489,9 @@ export async function runGeminiExtraction(
 					? `provider-http-${error.status}`
 					: 'provider-response-unavailable',
 			message:
-				'The details could not be read reliably. Your idea is safe; add anything you know or save it as it is.'
+				error instanceof ProviderError && error.status === 402
+					? 'AI help is unavailable. The administrator needs to check the Google billing balance. Your idea is kept; enter anything you know or save it as it is.'
+					: 'The details could not be read reliably. Your idea is safe; add anything you know or save it as it is.'
 		};
 		connection.sqlite
 			.prepare(

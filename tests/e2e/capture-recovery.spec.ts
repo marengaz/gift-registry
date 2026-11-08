@@ -178,9 +178,7 @@ test('retains edits and the replacement photo when an open saved offline draft r
 		await context.setOffline(true);
 		await page.getByLabel('Title', { exact: true }).fill('Offline train before editing');
 		await page.getByRole('button', { name: 'Save on this device', exact: true }).click();
-		await expect(
-			page.getByRole('heading', { name: 'Saved on this device', exact: true })
-		).toBeVisible();
+		await expect(page.getByRole('heading', { name: 'Waiting to send', exact: true })).toBeVisible();
 		await page.getByLabel('Title', { exact: true }).fill('Blue train with latest edits');
 		const png = await sharp({ create: { width: 20, height: 20, channels: 3, background: '#789' } })
 			.png()
@@ -228,9 +226,7 @@ test('opens the device draft while a fresh identity request is stalled', async (
 		await context.setOffline(true);
 		await page.getByLabel('Title', { exact: true }).fill('Local draft despite stalled connection');
 		await page.getByRole('button', { name: 'Save on this device', exact: true }).click();
-		await expect(
-			page.getByRole('heading', { name: 'Saved on this device', exact: true })
-		).toBeVisible();
+		await expect(page.getByRole('heading', { name: 'Waiting to send', exact: true })).toBeVisible();
 		const record = (await localRecords(page))[0];
 		await page.close();
 		const held = new Promise<void>((resolve) => {
@@ -408,7 +404,7 @@ test('keeps a knowingly signed-out unfinished idea unbound when a later account 
 		await capturing.goto(origin + '/capture');
 		await expect(capturing.getByLabel('Title', { exact: true })).toBeEnabled();
 		await expect(
-			capturing.getByText('You can keep an unbound draft on this device.', { exact: false })
+			capturing.getByText('You can keep a draft on this device.', { exact: false })
 		).toBeVisible();
 		await expect(
 			capturing.getByRole('button', { name: 'Save on this device', exact: true })
@@ -419,9 +415,9 @@ test('keeps a knowingly signed-out unfinished idea unbound when a later account 
 		await signIn(context, 'other');
 		await switching.goto(origin + '/capture');
 		await readyToCapture(switching);
-		await capturing.getByRole('button', { name: 'Save on this device', exact: true }).click();
+		await capturing.getByRole('button', { name: 'Keep for later', exact: true }).click();
 		await expect(
-			capturing.getByRole('button', { name: 'Adopt with my signed-in account', exact: true })
+			capturing.getByRole('button', { name: 'Knowingly unbound before later sign-in', exact: true })
 		).toBeVisible();
 		const saved = (await localRecords(capturing)).find(
 			(record) => record.draft.title === 'Knowingly unbound before later sign-in'
@@ -437,7 +433,7 @@ test('keeps a knowingly signed-out unfinished idea unbound when a later account 
 	}
 });
 
-test('preserves an unfinished photo before sign-out, restores the editor on cancel and synchronises exactly once on confirmation', async ({
+test('preserves an unfinished photo through sign-out and cancellation, then publishes once after its author saves', async ({
 	browser
 }) => {
 	const context = await browser.newContext({ extraHTTPHeaders: { 'x-forwarded-proto': 'http' } });
@@ -472,13 +468,41 @@ test('preserves an unfinished photo before sign-out, restores the editor on canc
 		await page.getByLabel('Title', { exact: true }).fill('Final photo before sign-out');
 		await page.getByRole('button', { name: 'Sign out', exact: true }).click();
 		await expect(page.getByRole('dialog', { name: 'Keep your pending ideas safe' })).toBeVisible();
-		await page.getByRole('button', { name: 'Synchronise, then sign out', exact: true }).click();
+		await page.getByRole('button', { name: 'Keep drafts and sign out', exact: true }).click();
 		await expect(page).toHaveURL(origin + '/login');
 		expect(savedCounts('Unfinished photo before sign-out')).toEqual({
 			products: 0,
 			media: 0,
 			entries: 0
 		});
+		expect(savedCounts('Final photo before sign-out')).toEqual({
+			products: 0,
+			media: 0,
+			entries: 0
+		});
+		const returning = new Database(join(directory, 'gifts.sqlite'));
+		try {
+			returning
+				.prepare(
+					'INSERT INTO session (id,user_id,token,expires_at,created_at,updated_at) VALUES (?,?,?,?,?,?)'
+				)
+				.run(
+					'returning-guest',
+					'guest',
+					'token-guest',
+					Date.now() + 3600000,
+					Date.now(),
+					Date.now()
+				);
+		} finally {
+			returning.close();
+		}
+		await signIn(context, 'guest');
+		await page.goto(origin + '/capture');
+		await page.getByRole('button', { name: 'Final photo before sign-out', exact: true }).click();
+		await expect(page.getByText('unfinished.png', { exact: false })).toBeVisible();
+		await page.getByRole('button', { name: 'Save idea', exact: true }).click();
+		await expect(page.getByRole('heading', { name: 'Idea saved', exact: true })).toBeVisible();
 		expect(savedCounts('Final photo before sign-out')).toEqual({
 			products: 1,
 			media: 1,

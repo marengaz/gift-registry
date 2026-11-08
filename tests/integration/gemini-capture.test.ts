@@ -93,6 +93,34 @@ beforeEach(() => {
 afterEach(() => context.connection.close());
 
 describe('generic capture extraction', () => {
+	it('keeps an AI billing failure distinct from an unreadable product page', async () => {
+		const transport = vi.fn(
+			async () => new Response(null, { status: 402 })
+		) as unknown as typeof fetch;
+		const result = await runGeminiExtraction(context.connection, context.admin, input(), {
+			environment,
+			transport
+		});
+		expect(result.suggestions).toEqual([]);
+		expect(result.message).toContain('billing');
+		const response = await metadataPreview(
+			context.connection,
+			event({ url: 'https://shop.example/train', assist: true, operationId: randomUUID() }),
+			async () => ({
+				status: 200,
+				headers: { 'content-type': 'text/html' },
+				body: Buffer.from(
+					'<title>Wooden train</title><h1>Wooden train</h1><p>A wooden stacking train. Product price GBP 12.50.</p>'
+				),
+				url: 'https://shop.example/train'
+			}),
+			{ environment, transport }
+		);
+		const body = await response.json();
+		expect(body.aiUnavailable).toBe(true);
+		expect(body.suggestions[0].title).toBe('Wooden train');
+		expect(body.message).toContain('billing');
+	});
 	it('reserves CLI evaluations centrally without sessions, duplicate spend or replay dispatch', () => {
 		const id = randomUUID();
 		const digest = 'a'.repeat(64);

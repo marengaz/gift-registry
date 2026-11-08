@@ -5,6 +5,7 @@
 	import { goto } from '$app/navigation';
 	import { importBrowserCapture } from '#lib/client/browser-capture.ts';
 	import CaptureEditor from '#lib/components/CaptureEditor.svelte';
+	import DraftPreview from '#lib/components/DraftPreview.svelte';
 	import { emptyDraft, captureTitle } from '#lib/catalogue-types.ts';
 	import {
 		draftStore,
@@ -17,6 +18,10 @@
 	let context = $state<CaptureContext | undefined>();
 	let loading = $state(true);
 	let busy = $state(false);
+	let localSaving = $state(false);
+	let localSaveTask: Promise<void> | undefined;
+	let localError = $state('');
+	let showContinuation = $state(true);
 	let message = $state('');
 	let browserImportError = $state('');
 	let storage = $state('');
@@ -59,6 +64,132 @@
 			photos.some((photo, index) => photo !== baselinePhotos[index])
 	);
 	const savedId = $derived(!dirty ? (current?.ack?.productId ?? '') : '');
+	const continuationTargets = $derived(
+		[...records, ...imports]
+			.filter(
+				(record) =>
+					record.id !== current?.id &&
+					!record.attemptedAt &&
+					record.status === 'local' &&
+					(record.readyToSync === false || record.draft.browserCapture?.pendingReview === true)
+			)
+			.slice(0, 5)
+	);
+	async function keepLocally(incomingShare?: boolean) {
+		if (localSaveTask) await localSaveTask;
+		if (blocked || !editorReady || current?.attemptedAt || !hasContents()) return;
+		const version = openVersion,
+			ownerId = formOwner;
+		const snapshot = JSON.stringify(draft),
+			files = [...photos];
+		localSaving = true;
+		localSaveTask = (async () => {
+			try {
+				const kept = await draftStore.save({
+					id: current?.id,
+					ownerId,
+					draft: JSON.parse(snapshot),
+					photos: files,
+					editorToken,
+					submit: false,
+					incomingShare
+				});
+				if (!sameForm(version, ownerId)) return;
+				current = kept;
+				if (
+					JSON.stringify(draft) === snapshot &&
+					photos.length === files.length &&
+					photos.every((file, index) => file === files[index])
+				)
+					markClean();
+				localError = '';
+				await lock();
+			} catch (error) {
+				if (sameForm(version, ownerId))
+					localError =
+						error instanceof Error && error.name === 'QuotaExceededError'
+							? 'Device storage is full. This idea has not been kept. Keep this page open and free some storage.'
+							: 'This idea could not be kept on this device. Keep the page open and try again.';
+				throw error;
+			} finally {
+				localSaving = false;
+			}
+		})();
+		try {
+			await localSaveTask;
+		} finally {
+			localSaveTask = undefined;
+		}
+	}
+	$effect(() => {
+		const changed = dirty;
+		if (
+			loading ||
+			busy ||
+			localSaving ||
+			blocked ||
+			!editorReady ||
+			firstIdentityPending ||
+			!changed ||
+			!hasContents() ||
+			current?.attemptedAt ||
+			current?.status === 'saved'
+		)
+			return;
+		const version = openVersion;
+		const timer = setTimeout(() => {
+			if (version === openVersion && !busy) void keepLocally().catch(() => {});
+		}, 400);
+		return () => clearTimeout(timer);
+	});
+	async function keepForLater() {
+		if (busy || blocked || !hasContents()) return;
+		busy = true;
+		try {
+			await keepLocally(false);
+			if (localError) return;
+			await unlock();
+			reset();
+			await goto('/capture', { replace: true });
+			message =
+				'Kept on this device. Choose the idea below to continue it; it will not send until you save.';
+		} catch {
+		} finally {
+			busy = false;
+		}
+	}
+	async function attachTo(target: LocalDraft) {
+		if (busy || blocked || !current || current.ownerId) return;
+		busy = true;
+		try {
+			await keepLocally();
+			const incoming = current.id;
+			if (target.ownerId) {
+				const person = await refreshCaptureIdentity();
+				if (person?.id !== target.ownerId)
+					throw new Error('Sign in as the idea’s author before adding the screenshot.');
+			}
+			await unlock();
+			const merged = await draftStore.attachIncoming(incoming, target.id, target.ownerId);
+			current = merged;
+			formOwner = merged.ownerId;
+			draft = merged.draft;
+			photos = await draftStore.files(merged.id, merged.ownerId);
+			showContinuation = false;
+			markClean();
+			await lock();
+			await goto('/capture?draft=' + encodeURIComponent(merged.id), { replace: true });
+			message = 'Screenshot added to this idea. Your link, edits and lists are kept.';
+		} catch (error) {
+			message =
+				error instanceof Error
+					? error.message
+					: 'The screenshot could not be attached. Both drafts are kept.';
+			await lock();
+		} finally {
+			busy = false;
+		}
+	}
 	function markClean() {
 		baseline = JSON.stringify(draft);
 		baselinePhotos = [...photos];
@@ -110,6 +241,7 @@
 		}
 	}
 	async function prepareSignOut() {
+		if (localSaveTask) await localSaveTask;
 		if (loading || busy || blocked)
 			throw new Error(
 				'Finish saving or recover the unfinished idea with its original account before signing out.'
@@ -127,7 +259,8 @@
 					ownerId,
 					draft,
 					photos,
-					editorToken
+					editorToken,
+					submit: false
 				});
 				if (!sameForm(version, ownerId))
 					throw new Error('The account changed. Review its drafts before signing out.');
@@ -156,6 +289,11 @@
 		};
 	}
 	async function preserveOwner() {
+		if (localSaveTask) {
+			try {
+				await localSaveTask;
+			} catch {}
+		}
 		if (changingOwner || !formOwner || formOwner === context?.ownerId) return;
 		changingOwner = true;
 		openVersion++;
@@ -168,7 +306,8 @@
 					ownerId: formOwner,
 					draft,
 					photos,
-					preserve: true
+					preserve: true,
+					submit: false
 				});
 			}
 			await unlock();
@@ -184,6 +323,11 @@
 		}
 	}
 	async function open(id: string) {
+		if (localSaveTask) {
+			try {
+				await localSaveTask;
+			} catch {}
+		}
 		firstIdentityPending = false;
 		if (
 			busy ||
@@ -212,6 +356,7 @@
 			formOwner = record.ownerId;
 			draft = record.draft;
 			photos = files;
+			showContinuation = true;
 			markClean();
 			editorReady = true;
 			message = record.message ?? '';
@@ -378,57 +523,119 @@
 		const online = () => {
 			void reconnect();
 		};
+		const leaving = (event: BeforeUnloadEvent) => {
+			if (dirty && hasContents()) {
+				event.preventDefault();
+				event.returnValue = '';
+			}
+		};
 		window.addEventListener('online', online);
+		window.addEventListener('beforeunload', leaving);
 		return () => {
 			destroyed = true;
 			unregisterPreparation();
 			subscription.unsubscribe();
 			window.removeEventListener('online', online);
+			window.removeEventListener('beforeunload', leaving);
 			void unlock();
 		};
 	});
 	async function save() {
 		if (busy || blocked || !editorReady) return;
-		if (draft.browserCapture) draft.browserCapture.pendingReview = false;
+		if (localSaveTask) {
+			try {
+				await localSaveTask;
+			} catch {
+				return;
+			}
+		}
 		firstIdentityPending = false;
-		const version = ++openVersion;
-		const ownerId = formOwner;
+		let version = ++openVersion;
+		let ownerId = formOwner;
 		busy = true;
 		message = '';
 		try {
+			if (navigator.onLine) {
+				const person = await refreshCaptureIdentity();
+				if (!sameForm(version, ownerId)) return;
+				if (
+					!person?.member ||
+					(!person.administrator &&
+						!person.lists.some((list) => !list.archivedAt && list.role === 'contributor'))
+				)
+					throw new Error(
+						'Sign in with contributor access to save. Your idea remains on this device.'
+					);
+				if (ownerId && person.id !== ownerId)
+					throw new Error('The account changed. Return to this idea’s author before saving.');
+				if (!ownerId) {
+					current = await draftStore.save({
+						id: current?.id,
+						ownerId: null,
+						draft,
+						photos,
+						editorToken,
+						submit: false,
+						incomingShare: false
+					});
+					await unlock();
+					current = await draftStore.adopt(current.id, person);
+					formOwner = person.id;
+					ownerId = person.id;
+					context = await draftStore.current();
+					version = ++openVersion;
+					await lock();
+				}
+			}
+			if (!ownerId) {
+				busy = false;
+				await keepLocally(false);
+				message = 'Kept on this device. Sign in, review the account shown, then choose Save idea.';
+				return;
+			}
+			if (!sameForm(version, ownerId)) return;
+			if (draft.browserCapture) draft.browserCapture.pendingReview = false;
+			if (
+				!draft.title.trim() &&
+				!draft.sourceUrl.trim() &&
+				photos.length &&
+				!draft.description.trim()
+			)
+				draft.title = 'Photo idea';
 			const record = await draftStore.save({
 				id: current?.id,
 				ownerId,
 				draft,
 				photos,
-				editorToken
+				editorToken,
+				submit: true,
+				incomingShare: false
 			});
 			if (!sameForm(version, ownerId)) return;
 			current = record;
 			markClean();
 			await lock();
 			if (!sameForm(version, ownerId)) return;
-			message = record.ownerId
-				? 'Saved on this device. Waiting to synchronise.'
-				: 'Saved on this device without an account. Sign in, then explicitly adopt this draft.';
-			if (navigator.onLine && record.ownerId) {
+			message = 'Saved on this device — will send when online.';
+			if (navigator.onLine) {
 				await unlock();
 				if (!sameForm(version, ownerId)) return;
-				await syncDrafts(draftStore, fetch, record.ownerId);
+				await syncDrafts(draftStore, fetch, ownerId);
 				if (!sameForm(version, ownerId)) return;
-				const updated = await draftStore.get(record.id, record.ownerId);
+				current = await draftStore.get(record.id, ownerId);
 				if (!sameForm(version, ownerId)) return;
-				current = updated;
 				await lock();
 			}
 		} catch (error) {
-			if (sameForm(version, ownerId))
+			if (sameForm(version, ownerId)) {
 				message =
 					error instanceof Error && error.name === 'QuotaExceededError'
 						? 'Device storage is full. This idea has not been saved on this device. Keep this page open, free storage and try again.'
 						: error instanceof Error
 							? error.message
-							: 'Saving on this device failed. Keep this page open and try again.';
+							: 'Saving failed. Keep this page open and try again.';
+				await lock();
+			}
 		} finally {
 			if (sameForm(version, ownerId)) busy = false;
 		}
@@ -457,28 +664,6 @@
 			if (sameForm(version, ownerId)) busy = false;
 		}
 	}
-	async function adopt() {
-		if (busy || blocked || !current || current.ownerId) return;
-		busy = true;
-		try {
-			const person = await refreshCaptureIdentity();
-			if (!person) throw new Error('Sign in before adopting this draft.');
-			await unlock();
-			current = await draftStore.adopt(current.id, person);
-			formOwner = current.ownerId;
-			context = await draftStore.current();
-			await lock();
-			message =
-				'This draft now belongs to your account. Review its lists, then save to synchronise.';
-		} catch (error) {
-			message =
-				error instanceof Error
-					? error.message
-					: 'Adoption needs a connection and current contributor access.';
-		} finally {
-			busy = false;
-		}
-	}
 	function reset() {
 		openVersion++;
 		busy = false;
@@ -491,6 +676,13 @@
 		message = '';
 	}
 	async function another() {
+		if (localSaveTask) {
+			try {
+				await localSaveTask;
+			} catch {
+				return;
+			}
+		}
 		if (
 			blocked ||
 			(dirty &&
@@ -501,14 +693,16 @@
 		await unlock();
 		reset();
 	}
-	const statusText = (status: LocalDraft['status']) =>
-		({
-			local: 'Saved on this device',
-			queued: 'Queued',
-			syncing: 'Synchronising',
-			saved: 'Saved to family catalogue',
-			needsattention: 'Needs attention'
-		})[status];
+	const statusText = (record: LocalDraft) =>
+		record.readyToSync === false && !record.attemptedAt
+			? 'Draft'
+			: {
+					local: 'Waiting to send',
+					queued: 'Waiting to send',
+					syncing: 'Sending',
+					saved: 'Saved to family catalogue',
+					needsattention: 'Needs attention'
+				}[record.status];
 </script>
 
 <svelte:head><title>Add an idea · Family gifts</title></svelte:head>
@@ -533,7 +727,15 @@
 		</section>
 	{:else if savedId}<section class="panel">
 			<h2>Idea saved</h2>
-			<p>Your idea was acknowledged by the server.</p>
+			<p>
+				{draft.listIds.length > 1
+					? 'One idea added to ' + draft.listIds.length + ' lists.'
+					: draft.listIds.length === 1
+						? 'Saved to ' +
+							(lists.find((list) => list.id === draft.listIds[0])?.name ?? 'your selected list') +
+							'.'
+						: 'Saved to unlisted ideas.'}
+			</p>
 			<div class="heading-actions">
 				<a class="button" href={`/products/${savedId}`}>View idea</a><button
 					class="secondary"
@@ -542,14 +744,41 @@
 			</div>
 		</section>
 	{:else if allowed}
+		{#if current?.incomingShare && !current.ownerId && photos.length && showContinuation && continuationTargets.length}
+			<section class="panel" aria-label="Continue an existing idea">
+				<h2>Use this with an existing idea?</h2>
+				<p>Your screenshot is kept. Choose the idea it belongs to, or start a new idea.</p>
+				{#each continuationTargets as target}<div class="draft-row">
+						<DraftPreview record={target} />
+						<div>
+							<button
+								type="button"
+								class="secondary"
+								disabled={busy}
+								onclick={() => attachTo(target)}>Add to {captureTitle(target.draft)}</button
+							>
+							<p class="muted">
+								{target.draft.sourceUrl} · {new Date(target.updatedAt).toLocaleString('en-GB')}
+							</p>
+						</div>
+					</div>{/each}
+				<button
+					type="button"
+					class="quiet"
+					disabled={busy}
+					onclick={() => {
+						showContinuation = false;
+						void keepLocally(false).catch(() => {});
+					}}>Start a new idea</button
+				>
+			</section>
+		{/if}
 		{#if current}<section class="panel">
-				<h2>{statusText(current.status)}</h2>
+				<h2>{statusText(current)}</h2>
 				{#if !current.ownerId}<p>
-						This draft has no account. Sign in and choose to adopt it before synchronising.
+						This idea is kept on this device. Check the account shown before choosing Save idea.
 					</p>
-					<button disabled={busy} onclick={adopt}>Adopt with my signed-in account</button><a
-						href="/login">Sign in</a
-					>
+					{#if !context}<a href="/login">Sign in</a>{/if}
 				{:else if current.attemptedAt}<p>
 						These details are held unchanged while we check whether the server saved them. Retry
 						with the same account to avoid duplicates.
@@ -564,8 +793,11 @@
 			{busy}
 			locked={!!current?.attemptedAt || busy || !editorReady || blocked}
 			onSave={save}
+			onKeep={keepForLater}
+			onEnsureLocal={() => keepLocally()}
 			localCapture
-			canSynchronise={!!formOwner && formOwner === context?.ownerId}
+			canSynchronise={!!context?.ownerId && (!formOwner || formOwner === context.ownerId)}
+			addingAs={context?.name ?? ''}
 			onListsChanged={() => {
 				requestedListPending = null;
 			}}
@@ -574,8 +806,8 @@
 				Checking your account. You can start writing now.
 			</p>
 		{:else if !context}<p class="notice">
-				You can keep an unbound draft on this device. Current contributor permission is required to
-				synchronise it. <a href="/login">Sign in</a>
+				You can keep a draft on this device. Sign in with contributor access when you are ready to
+				save it. <a href="/login">Sign in</a>
 			</p>{/if}
 	{:else}<section class="panel">
 			<h2>Contributor access needed</h2>
@@ -591,14 +823,22 @@
 		>
 			{message}
 		</p>{/if}
+	{#if localError}<p class="notice error" role="alert">{localError}</p>
+	{:else if localSaving}<p role="status" class="muted">Keeping this draft…</p>
+	{:else if current && !current.attemptedAt && current.readyToSync === false}<p class="muted">
+			Draft kept on this device.
+		</p>{/if}
 	{#if storage}<p class="muted storage-note">{storage}</p>{/if}
 	{#if records.length || imports.length}<section class="panel">
-			<h2>Ideas on this device</h2>
+			<h2>Drafts on this device</h2>
 			<ul class="draft-list">
 				{#each [...records, ...imports] as record}<li>
-						<button class="quiet" onclick={() => open(record.id)}
-							>{captureTitle(record.draft)}</button
-						><span>{statusText(record.status)}{!record.ownerId ? ' · account needed' : ''}</span>
+						<DraftPreview {record} />
+						<div>
+							<button class="quiet" onclick={() => open(record.id)}
+								>{captureTitle(record.draft)}</button
+							><span>{statusText(record)}{!record.ownerId ? ' · sign in to save' : ''}</span>
+						</div>
 					</li>{/each}
 			</ul>
 		</section>{/if}
@@ -609,10 +849,20 @@
 		font-size: 0.85rem;
 	}
 	.draft-list {
-		padding-left: 1rem;
+		padding: 0;
+		list-style: none;
 	}
 	.draft-list li {
 		margin-bottom: 0.65rem;
+		display: flex;
+		gap: 0.8rem;
+	}
+	.draft-row {
+		display: flex;
+		gap: 0.8rem;
+		align-items: center;
+		margin: 0.8rem 0;
+		overflow-wrap: anywhere;
 	}
 	.draft-list span {
 		display: block;

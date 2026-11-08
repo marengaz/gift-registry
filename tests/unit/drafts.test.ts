@@ -37,6 +37,8 @@ describe('durable capture drafts', () => {
 		expect(restored?.operationId).toBe(record.operationId);
 		expect(restored?.draft.listIds).toEqual(['birthday']);
 		expect(await (await reopened.files(record.id, 'a'))[0].text()).toBe('photo bytes');
+		expect(await (await reopened.firstPhoto(record.id, 'a'))?.text()).toBe('photo bytes');
+		await expect(reopened.firstPhoto(record.id, 'b')).rejects.toThrow(/not available/);
 		reopened.close();
 	});
 	it('never lists or adopts another account’s drafts and explicitly adopts unbound imports', async () => {

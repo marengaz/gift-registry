@@ -11,6 +11,13 @@
 	let busy = $state(false);
 	let error = $state('');
 	let ready = $state(false);
+	const unfinished = $derived(
+		pending.filter(
+			(record) =>
+				record.readyToSync === false || record.draft.browserCapture?.pendingReview === true
+		)
+	);
+	const queued = $derived(pending.filter((record) => !unfinished.includes(record)));
 	async function retry() {
 		if (busy) return;
 		busy = true;
@@ -76,11 +83,11 @@
 {#if ready && (pending.length || unbound || error)}
 	<aside class="sync-status" aria-label="Capture synchronisation">
 		{#if error}<p role="alert">{error}</p>{/if}
-		{#if pending.length}<p role="status">
-				{pending.length}
-				{pending.length === 1 ? 'idea' : 'ideas'} pending for {context?.name}. {offline
+		{#if queued.length}<p role="status">
+				{queued.length}
+				{queued.length === 1 ? 'idea' : 'ideas'} waiting to send for {context?.name}. {offline
 					? 'Saved on this device; connect to synchronise.'
-					: pending.some((record) => record.status === 'needsattention')
+					: queued.some((record) => record.status === 'needsattention')
 						? 'Some ideas need attention. Sign in as their author and check access before retrying.'
 						: 'Waiting to synchronise.'}
 			</p>
@@ -90,9 +97,11 @@
 				onclick={retry}>{busy ? 'Checking…' : 'Retry synchronisation'}</button
 			>
 		{/if}
-		{#if unbound}<p>
-				{unbound} unbound {unbound === 1 ? 'draft needs' : 'drafts need'} an account.
-				<a href="/capture">Review and adopt</a>
+		{#if unfinished.length || unbound}<p>
+				{unfinished.length + unbound} unfinished {unfinished.length + unbound === 1
+					? 'idea is'
+					: 'ideas are'} kept on this device.
+				<a href="/capture">Continue a draft</a>
 			</p>{/if}
 	</aside>
 {/if}

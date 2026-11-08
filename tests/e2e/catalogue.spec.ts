@@ -188,7 +188,7 @@ test('contributor keeps an invalid-photo draft and sees only permitted lists wit
 		await page.getByRole('button', { name: 'Save idea', exact: true }).click();
 		await expect(page.getByRole('alert')).toContainText('could not be opened safely');
 		await expect(page.getByLabel('Title', { exact: true })).toHaveValue('Keep this draft');
-		await page.getByLabel('Photos').setInputFiles([]);
+		await page.getByRole('button', { name: 'Remove broken.png', exact: true }).click();
 		await page.getByRole('button', { name: 'Save idea', exact: true }).click();
 		await expect(page.getByRole('heading', { name: 'Idea saved', exact: true })).toBeVisible();
 		await page.goto(origin + '/inbox');

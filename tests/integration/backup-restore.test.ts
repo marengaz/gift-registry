@@ -46,7 +46,8 @@ async function household() {
  INSERT INTO media(id,product_id,storage_path,mime_type,byte_size) VALUES('photo','gift','photo/original','image/jpeg',8);
  INSERT INTO identification_settings(id,enabled) VALUES(1,1);
  INSERT INTO lookup_jobs(id,product_id,actor_id,actor_session_id,operation_id,fingerprint,kind,state,dispatched_at) VALUES('paid','gift','admin','session-admin','paid','paid','vision','uncertain',1),('pending','gift','admin','session-admin','pending','pending','metadata','queued',NULL),('running','gift','admin','session-admin','running','running','vision','running',NULL);
- INSERT INTO allowance_reservations(job_id,month,amount_microdollars,pricing_revision,project_id) VALUES('paid','2026-11',3500,'test','personal-test'),('running','2026-11',3500,'test','personal-test');`);
+ INSERT INTO allowance_reservations(job_id,month,amount_microdollars,pricing_revision,project_id) VALUES('paid','2026-11',3500,'test','personal-test'),('running','2026-11',3500,'test','personal-test');
+ INSERT INTO gemini_capture_requests(actor_id,operation_id,fingerprint,month,reserved_microdollars,state,result_json,created_at) VALUES('admin','gemini-complete','complete-evidence','2026-11',20000,'complete','{"suggestions":[],"message":"No reliable price"}',1),('admin','gemini-running','running-evidence','2026-11',20000,'running',NULL,2);`);
 	const databasePath = join(root, 'live.sqlite');
 	await model.connection.sqlite.backup(databasePath);
 	model.connection.close();
@@ -76,6 +77,37 @@ describe('consistent household recovery', () => {
 			expect(
 				db.prepare('SELECT sum(amount_microdollars) AS total FROM allowance_reservations').get()
 			).toEqual({ total: 7000 });
+			expect(
+				db
+					.prepare(
+						'SELECT actor_id,operation_id,fingerprint,state,result_json,reserved_microdollars FROM gemini_capture_requests ORDER BY operation_id'
+					)
+					.all()
+			).toEqual([
+				{
+					actor_id: 'admin',
+					operation_id: 'gemini-complete',
+					fingerprint: 'complete-evidence',
+					state: 'complete',
+					result_json: '{"suggestions":[],"message":"No reliable price"}',
+					reserved_microdollars: 20000
+				},
+				{
+					actor_id: 'admin',
+					operation_id: 'gemini-running',
+					fingerprint: 'running-evidence',
+					state: 'running',
+					result_json: null,
+					reserved_microdollars: 20000
+				}
+			]);
+			expect(
+				db
+					.prepare(
+						'SELECT (SELECT sum(amount_microdollars) FROM allowance_reservations) + (SELECT sum(reserved_microdollars) FROM gemini_capture_requests) AS total'
+					)
+					.get()
+			).toEqual({ total: 47000 });
 			expect(db.prepare('SELECT enabled FROM identification_settings').get()).toEqual({
 				enabled: 0
 			});

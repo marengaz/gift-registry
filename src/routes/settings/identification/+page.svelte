@@ -52,11 +52,32 @@
 			<p class="eyebrow">Optional help</p>
 			<h1>Product identification</h1>
 			<p class="muted">
-				Retailer metadata is free to retrieve. Image matching uses your personal Google Vision
-				project.
+				The existing retailer reader runs first. Gemini can fill missing details from readable
+				pages, text and selected screenshots. Ordinary capture always works without AI.
 			</p>
 		</div>
 	</div>
+	<section class="panel">
+		<h2>Gemini help with gift details</h2>
+		<p>
+			{data.gemini.configured
+				? 'Gemini is configured on the server.'
+				: 'Set GEMINI_API_KEY on the server to configure Gemini.'}
+		</p>
+		<p>{data.gemini.enabled ? 'AI help is enabled.' : 'Enable AI help below to use it.'}</p>
+		<p>
+			{usd(data.gemini.reservedMicrodollars)} reserved of {usd(
+				data.gemini.monthlyLimitMicrodollars
+			)} this UTC month; {usd(data.gemini.remainingMicrodollars)} remains.
+		</p>
+		<p class="muted">
+			Each request reserves {usd(data.gemini.reservationMicrodollars)} conservatively, including failed
+			or uncertain requests. Evaluations are included in this allowance and have their own {usd(
+				data.gemini.evaluationLimitMicrodollars
+			)} limit. The environment limits and the administrator's allowance both apply; the smaller remaining
+			allowance wins.
+		</p>
+	</section>
 	<section class="panel">
 		<h2>This UTC month: {data.month}</h2>
 		<p>
@@ -83,7 +104,8 @@
 		class="panel"
 	>
 		<label class="check-label"
-			><input type="checkbox" bind:checked={enabled} /><span>Enable paid image identification</span
+			><input type="checkbox" bind:checked={enabled} /><span
+				>Enable AI help and paid image identification</span
 			></label
 		><label>Monthly allowance (USD)<input inputmode="decimal" bind:value={allowance} /></label>
 		<details>

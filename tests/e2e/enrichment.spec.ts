@@ -96,159 +96,360 @@ async function signIn(context: BrowserContext) {
 		}
 	]);
 }
-test('captures shop-page details through the browser button and saves one reviewed idea', async ({
+test('keeps an unfinished idea local across reload and only publishes after explicit Save', async ({
 	browser
 }) => {
 	const context = await browser.newContext({ extraHTTPHeaders: { 'x-forwarded-proto': 'http' } });
 	await signIn(context);
 	const page = await context.newPage();
+	let published = 0;
+	await context.route('**/api/captures', (route) => {
+		published++;
+		return route.continue();
+	});
 	try {
 		await page.goto(origin + '/capture');
-		await page.getByText('Save from a shop page', { exact: true }).click();
-		const bookmark = await page
-			.getByRole('link', { name: 'Save gift', exact: true })
-			.getAttribute('href');
-		expect(bookmark).toMatch(/^javascript:/);
+		await page.getByLabel('Title', { exact: true }).fill('Keep this console for later');
+		await expect(page.getByRole('button', { name: 'Keep for later', exact: true })).toBeVisible({
+			timeout: 2000
+		});
+		await page.getByRole('button', { name: 'Keep for later', exact: true }).click();
+		await expect(page.getByText('Kept on this device', { exact: false }).first()).toBeVisible();
+		await page.reload();
+		await page.getByRole('button', { name: 'Keep this console for later', exact: true }).click();
+		await expect(page.getByLabel('Title', { exact: true })).toHaveValue(
+			'Keep this console for later'
+		);
+		await page.waitForLoadState('networkidle');
+		expect(published).toBe(0);
+		await page.getByRole('button', { name: 'Save idea', exact: true }).click();
+		await expect(page.getByRole('heading', { name: 'Idea saved', exact: true })).toBeVisible();
+		expect(published).toBe(1);
+	} finally {
+		await context.close();
+	}
+});
+test('keeps legacy browser captures recoverable without a bookmarklet setup or automatic publication', async ({
+	browser
+}) => {
+	const context = await browser.newContext({ extraHTTPHeaders: { 'x-forwarded-proto': 'http' } });
+	await signIn(context);
+	const page = await context.newPage();
+	let published = 0;
+	await context.route('**/api/captures', (route) => {
+		published++;
+		return route.continue();
+	});
+	try {
 		const picture = await sharp({
 			create: { width: 3, height: 3, channels: 3, background: '#79a' }
 		})
 			.webp()
 			.toBuffer();
-		await context.route('**/api/metadata/image', (route) => {
-			expect(route.request().postDataJSON()).toEqual({ url: 'https://images.example/toy.webp' });
-			return route.fulfill({ contentType: 'image/webp', body: picture });
-		});
-		await context.route('https://images.example/**', (route) =>
+		await context.route('**/api/metadata/image', (route) =>
 			route.fulfill({ contentType: 'image/webp', body: picture })
 		);
-		let saveRequested = false;
-		await context.route('**/api/captures', (route) => {
-			expect(saveRequested, 'A browser capture must wait for Save idea').toBe(true);
-			return route.continue();
-		});
-		const shops = [
-			'https://www.smythstoys.com/uk/en-gb/gaming-and-tech/console/p/266502',
-			'https://www.argos.co.uk/product/3376913',
-			'https://www.currys.co.uk/products/example-console-10281815.html',
-			'https://www.etsy.com/uk/listing/1395933334/example-toy',
-			'https://www.hamleys.com/example-toy',
-			'https://www.thetoyshop.com/toy/p/582531',
-			'https://www.lego.com/en-gb/product/police-car-60312',
-			'https://www.theworks.co.uk/p/toy/5052089328631.html',
-			'https://www.johnlewis.com/example-toy/p115349819'
-		];
-		await context.route(shops[0], (route) =>
-			route.fulfill({ contentType: 'text/html', body: '<h1>Access denied</h1>' })
+		await page.goto(
+			origin +
+				'/capture#gift=' +
+				encodeURIComponent(
+					JSON.stringify({
+						version: 1,
+						sourceUrl: 'https://www.smythstoys.com/toy/p/266502',
+						title: 'Legacy console',
+						imageUrl: 'https://images.example/toy.webp',
+						priceText: '49.95',
+						currency: 'GBP',
+						fromPrice: false
+					})
+				)
 		);
-		await page.goto(shops[0]);
-		const refused = page.waitForEvent('dialog');
-		await page.evaluate((href) => {
-			const link = document.createElement('a');
-			link.href = href!;
-			link.textContent = 'Run saved browser button';
-			document.body.append(link);
-		}, bookmark);
-		const blockedClick = page
-			.getByRole('link', { name: 'Run saved browser button', exact: true })
-			.click();
-		const dialog = await refused;
-		expect(dialog.message()).toContain('Wait until the product page is visible');
-		await dialog.accept();
-		await blockedClick;
-		await expect(page).toHaveURL(shops[0]);
-		const cases = [
-			...shops.map((url) => ({
-				url,
-				offers: { price: '49.95', priceCurrency: 'GBP' },
-				estimate: '49.95',
-				savedOffer: { priceMinor: 4995, currency: 'GBP' }
-			})),
-			{
-				url: shops[0],
-				offers: { '@type': 'AggregateOffer', lowPrice: '49.95', priceCurrency: 'GBP' },
-				estimate: '',
-				savedOffer: { priceMinor: null, currency: 'GBP' }
-			},
-			{
-				url: shops[1],
-				offers: [
-					{ price: '49.95', priceCurrency: 'GBP' },
-					{ price: '59.95', priceCurrency: 'GBP' }
-				],
-				estimate: '',
-				savedOffer: { priceMinor: null, currency: 'GBP' }
-			},
-			{
-				url: shops[3],
-				offers: { price: '1500', priceCurrency: 'JPY' },
-				estimate: '',
-				savedOffer: { priceMinor: 1500, currency: 'JPY' }
-			},
-			{
-				url: shops[0],
-				offers: { price: '49.95', priceCurrency: 'GBP' },
-				estimate: '49.95',
-				savedOffer: { priceMinor: 4995, currency: 'GBP' }
-			}
-		];
-		for (const [index, { url, offers, estimate, savedOffer }] of cases.entries()) {
-			saveRequested = false;
-			const title = 'Browser gift ' + index;
-			const imageUrl = index === 12 ? '' : 'https://images.example/toy.webp';
-			const html =
-				index === 5
-					? `<h1>${title}</h1><meta name="description" content="Details visible in the shop"><span itemprop="price">£0.00</span><div class="js-pdp-price"><span class="price">£49.95</span><span class="wasPrice">£60.00</span></div><div class="image-gallery__image"><img src="https://images.example/toy.webp"></div>`
-					: `<h1>${title}</h1><script type="application/ld+json">${JSON.stringify({ '@type': 'Product', name: title, description: 'Details visible in the shop', image: imageUrl, offers })}</script>`;
-			await context.route(url, (route) =>
-				route.fulfill({
-					contentType: 'text/html; charset=utf-8',
-					body: html
-				})
-			);
-			await page.goto(url);
-			await page.evaluate((href) => {
-				const link = document.createElement('a');
-				link.href = href!;
-				link.textContent = 'Run saved browser button';
-				document.body.append(link);
-			}, bookmark);
-			await page.getByRole('link', { name: 'Run saved browser button', exact: true }).click();
-			await expect(page).toHaveURL(/\/capture\?draft=/);
-			await expect(page.getByLabel('Title', { exact: true })).toHaveValue(title);
-			await expect(page.getByLabel('Estimated price (£)', { exact: true })).toHaveValue(estimate);
-			if (imageUrl)
-				await expect(page.getByText('browser-image.webp', { exact: false })).toBeVisible();
-			if (index === 0) {
-				await page.reload();
-				await expect(page.getByLabel('Title', { exact: true })).toHaveValue(title);
-				await expect(page.getByRole('button', { name: title, exact: true })).toHaveCount(1);
-				await expect(page.getByText('browser-image.webp', { exact: false })).toBeVisible();
-			}
-			await page
-				.getByRole('button', { name: 'Adopt with my signed-in account', exact: true })
-				.click();
-			await expect(page.getByRole('button', { name: 'Save idea', exact: true })).toBeEnabled();
-			if (index === 12) {
-				await page.reload();
-				await page.waitForLoadState('networkidle');
-				await expect(page.getByLabel('Title', { exact: true })).toHaveValue(title);
-				await expect(page.getByRole('button', { name: 'Save idea', exact: true })).toBeEnabled();
-			}
-			saveRequested = true;
-			await page.getByRole('button', { name: 'Save idea', exact: true }).click();
-			await expect(page.getByRole('heading', { name: 'Idea saved', exact: true })).toBeVisible();
-			const href = await page
-				.getByRole('link', { name: 'View idea', exact: true })
-				.getAttribute('href');
-			const saved = await (await context.request.get(origin + '/api' + href)).json();
-			expect(saved).toMatchObject({ title, sourceUrl: url });
-			expect(saved.media).toHaveLength(imageUrl ? 1 : 0);
-			expect(saved.offers[0]).toMatchObject(savedOffer);
-		}
+		await expect(page).toHaveURL(/\/capture\?draft=/);
+		await expect(page.getByLabel('Title', { exact: true })).toHaveValue('Legacy console');
+		await expect(page.getByText('browser-image.webp', { exact: false })).toBeVisible();
+		await expect(page.getByText('Save from a shop page', { exact: true })).toHaveCount(0);
+		await page.reload();
+		await expect(page.getByLabel('Title', { exact: true })).toHaveValue('Legacy console');
+		await expect(page.getByText('browser-image.webp', { exact: false })).toBeVisible();
+		expect(published).toBe(0);
+		await page.getByRole('button', { name: 'Save idea', exact: true }).click();
+		await expect(page.getByRole('heading', { name: 'Idea saved', exact: true })).toBeVisible();
+		expect(published).toBe(1);
+		const href = await page
+			.getByRole('link', { name: 'View idea', exact: true })
+			.getAttribute('href');
+		const saved = await (await context.request.get(origin + '/api' + href)).json();
+		expect(saved).toMatchObject({
+			title: 'Legacy console',
+			sourceUrl: 'https://www.smythstoys.com/toy/p/266502'
+		});
+		expect(saved.media).toHaveLength(1);
+		expect(saved.offers[0]).toMatchObject({ priceMinor: 4995, currency: 'GBP' });
 	} finally {
 		await context.close();
 	}
 });
+test('crops a screenshot locally, fills on request and preserves deliberate edits through undo and saving', async ({
+	browser
+}) => {
+	const context = await browser.newContext({
+		viewport: { width: 390, height: 844 },
+		extraHTTPHeaders: { 'x-forwarded-proto': 'http' }
+	});
+	await signIn(context);
+	const page = await context.newPage();
+	let imageRequests = 0;
+	await context.route('**/api/metadata', (route) =>
+		route.fulfill({ json: { suggestions: [], blocked: true, message: 'Shop blocked' } })
+	);
+	await context.route('**/api/capture-details', async (route) => {
+		if (route.request().method() === 'GET')
+			return route.fulfill({ json: { configured: true, enabled: true } });
+		imageRequests++;
+		const request = new Request(origin + '/api/capture-details', {
+			method: 'POST',
+			headers: route.request().headers(),
+			body: new Uint8Array(route.request().postDataBuffer()!)
+		});
+		const form = await request.formData();
+		expect(form.get('kind')).toBe('image');
+		const image = form.get('image') as File;
+		const bytes = Buffer.from(await image.arrayBuffer());
+		const metadata = await sharp(bytes).metadata();
+		expect(metadata.width).toBe(50);
+		expect(metadata.height).toBe(100);
+		const pixel = await sharp(bytes)
+			.extract({ left: 25, top: 50, width: 1, height: 1 })
+			.removeAlpha()
+			.raw()
+			.toBuffer();
+		expect(pixel[0]).toBeLessThan(30);
+		expect(pixel[1]).toBeGreaterThan(220);
+		expect(pixel[2]).toBeLessThan(30);
+		return route.fulfill({
+			json: {
+				suggestions: [
+					{
+						title: 'Model console',
+						description: 'A description to review',
+						variant: 'Blue',
+						imageUrl: null,
+						sourceUrl: 'https://shop.example/console',
+						retrievedAt: Date.now(),
+						source: 'gemini',
+						offer: {
+							url: 'https://shop.example/console',
+							retailer: 'Shop',
+							priceMinor: 4200,
+							currency: 'GBP',
+							priceText: '42.00',
+							fromPrice: false
+						},
+						uncertainty: []
+					}
+				],
+				message: 'Review the details'
+			}
+		});
+	});
+	try {
+		await page.goto(origin + '/capture');
+		await page.getByLabel('Product link').fill('https://shop.example/console');
+		await expect(
+			page.getByText("We couldn't read this shop page.", { exact: false })
+		).toBeVisible();
+		await page.getByLabel('Title', { exact: true }).fill('Console for Luke');
+		await page.getByLabel('Description', { exact: true }).fill('My note');
+		await page.getByLabel('Description', { exact: true }).fill('');
+		await page.getByRole('checkbox', { name: 'Child · Birthday Birthday' }).check();
+		const photo = await sharp(
+			Buffer.from(
+				'<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100"><rect width="100" height="100" fill="red"/><rect x="100" width="100" height="100" fill="#00ff00"/></svg>'
+			)
+		)
+			.png()
+			.toBuffer();
+		await page
+			.getByLabel('Photos', { exact: false })
+			.setInputFiles({ name: 'shop-shot.png', mimeType: 'image/png', buffer: photo });
+		await page.getByRole('button', { name: 'Crop or rotate', exact: true }).click();
+		await page.getByRole('button', { name: 'Rotate right', exact: true }).click();
+		await expect(
+			page.getByRole('button', { name: 'Use cropped image', exact: true })
+		).toBeEnabled();
+		await page.getByLabel('Crop left (%)', { exact: true }).fill('50');
+		await page.getByLabel('Crop top (%)', { exact: true }).fill('50');
+		await page.getByLabel('Crop width (%)', { exact: true }).fill('50');
+		await page.getByLabel('Crop height (%)', { exact: true }).fill('50');
+		await page.getByRole('button', { name: 'Use cropped image', exact: true }).click();
+		await expect(page.getByText('shop-shot-crop.webp', { exact: true })).toBeVisible();
+		await expect
+			.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
+			.toBe(true);
+		await page.screenshot({ path: '/private/tmp/gift-new-capture-mobile.png', fullPage: true });
+		expect(imageRequests).toBe(0);
+		await page.getByRole('button', { name: 'Fill from image', exact: true }).click();
+		await expect(page.getByLabel('Estimated price (£)', { exact: true })).toHaveValue('42.00');
+		await expect(page.getByLabel('Title', { exact: true })).toHaveValue('Console for Luke');
+		await expect(page.getByLabel('Description', { exact: true })).toHaveValue('');
+		await page.getByText('More details', { exact: true }).click();
+		await expect(page.getByLabel('Variant or size')).toHaveValue('Blue');
+		await page.getByLabel('Estimated price (£)', { exact: true }).fill('35.00');
+		await page.getByRole('button', { name: 'Undo autofill', exact: true }).click();
+		await expect(page.getByLabel('Variant or size')).toHaveValue('');
+		await expect(page.getByLabel('Estimated price (£)', { exact: true })).toHaveValue('35.00');
+		await expect(page.getByLabel('Title', { exact: true })).toHaveValue('Console for Luke');
+		await expect(page.getByRole('checkbox', { name: 'Child · Birthday Birthday' })).toBeChecked();
+		await page.setViewportSize({ width: 1280, height: 900 });
+		await expect
+			.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
+			.toBe(true);
+		await page.screenshot({ path: '/private/tmp/gift-new-capture-desktop.png', fullPage: true });
+		await page.getByRole('button', { name: 'Save idea', exact: true }).click();
+		await expect(page.getByRole('heading', { name: 'Idea saved', exact: true })).toBeVisible();
+		const href = await page
+			.getByRole('link', { name: 'View idea', exact: true })
+			.getAttribute('href');
+		const saved = await (await context.request.get(origin + '/api' + href)).json();
+		expect(saved.title).toBe('Console for Luke');
+		expect(saved.entries[0].estimatePence).toBe(3500);
+		expect(saved.media).toHaveLength(1);
+		const attachment = await context.request.get(origin + '/api/media/' + saved.media[0].id);
+		const savedImage = await attachment.body();
+		const published = await sharp(savedImage).metadata();
+		expect(published.width).toBe(50);
+		expect(published.height).toBe(100);
+		const savedPixel = await sharp(savedImage)
+			.extract({ left: 25, top: 50, width: 1, height: 1 })
+			.removeAlpha()
+			.raw()
+			.toBuffer();
+		expect(savedPixel[0]).toBeLessThan(30);
+		expect(savedPixel[1]).toBeGreaterThan(220);
+		expect(savedPixel[2]).toBeLessThan(30);
+		expect(imageRequests).toBe(1);
+		await page.screenshot({ path: '/private/tmp/gift-capture-cropped-mobile.png', fullPage: true });
+	} finally {
+		await context.close();
+	}
+});
+for (const kind of ['text', 'image'] as const) {
+	test(`reconciles a lost ${kind} extraction response before a fresh explicit retry after provider failure`, async ({
+		browser
+	}) => {
+		const context = await browser.newContext({ extraHTTPHeaders: { 'x-forwarded-proto': 'http' } });
+		await signIn(context);
+		const page = await context.newPage();
+		const operations: string[] = [];
+		await context.route('**/api/capture-details', async (route) => {
+			if (route.request().method() === 'GET')
+				return route.fulfill({ json: { configured: true, enabled: true } });
+			const request = new Request(origin + '/api/capture-details', {
+				method: 'POST',
+				headers: route.request().headers(),
+				body: new Uint8Array(route.request().postDataBuffer()!)
+			});
+			const form = await request.formData();
+			expect(form.get('kind')).toBe(kind);
+			const id = String(form.get('operationId'));
+			operations.push(id);
+			if (operations.length === 1) return route.abort('failed');
+			if (id === operations[0])
+				return route.fulfill({
+					json: {
+						suggestions: [],
+						failure: 'provider',
+						message: 'Provider failed. Your idea is kept.'
+					}
+				});
+			return route.fulfill({
+				json: {
+					suggestions: [
+						{
+							title: 'Recovered train',
+							description: null,
+							variant: null,
+							imageUrl: null,
+							sourceUrl: '',
+							retrievedAt: 123,
+							source: 'gemini',
+							offer: null,
+							uncertainty: []
+						}
+					],
+					message: 'Details found.'
+				}
+			});
+		});
+		try {
+			await page.goto(origin + '/capture');
+			if (kind === 'text') {
+				await page.getByRole('button', { name: 'Paste text', exact: true }).click();
+				await page.getByLabel('Text to read', { exact: true }).fill('A wooden train to remember.');
+			} else {
+				const buffer = await sharp({
+					create: { width: 2, height: 2, channels: 3, background: '#acf' }
+				})
+					.png()
+					.toBuffer();
+				await page
+					.getByLabel('Photos', { exact: false })
+					.setInputFiles({ name: 'train.png', mimeType: 'image/png', buffer });
+			}
+			const fill = page.getByRole('button', { name: `Fill from ${kind}`, exact: true });
+			await fill.click();
+			await expect.poll(() => operations.length).toBe(1);
+			await expect(fill).toBeEnabled();
+			await fill.click();
+			await expect(
+				page.getByText('Provider failed. Your idea is kept.', { exact: true })
+			).toBeVisible();
+			expect(operations[1]).toBe(operations[0]);
+			await fill.click();
+			await expect.poll(() => operations.length).toBe(3);
+			expect(operations[2]).not.toBe(operations[0]);
+			await expect(page.getByLabel('Title', { exact: true })).toHaveValue('Recovered train');
+		} finally {
+			await context.close();
+		}
+	});
+}
+
+test('offers the AI opt-out before lookup even while settings are still loading', async ({
+	browser
+}) => {
+	const context = await browser.newContext({ extraHTTPHeaders: { 'x-forwarded-proto': 'http' } });
+	await signIn(context);
+	const page = await context.newPage();
+	let release = () => {};
+	const gate = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	const assists: boolean[] = [];
+	await context.route('**/api/capture-details', async (route) => {
+		await gate;
+		await route.fulfill({ json: { configured: true, enabled: true } });
+	});
+	await context.route('**/api/metadata', async (route) => {
+		assists.push(route.request().postDataJSON().assist);
+		await route.fulfill({ json: { suggestions: [], message: 'No details found.' } });
+	});
+	try {
+		await page.goto(origin + '/capture', { waitUntil: 'domcontentloaded' });
+		const optOut = page.getByRole('checkbox', { name: 'Use AI for missing page details' });
+		await expect(optOut).toBeVisible({ timeout: 1500 });
+		await expect(
+			page.getByText('Product content may be sent to Google.', { exact: false })
+		).toBeVisible();
+		await optOut.uncheck();
+		await page.getByLabel('Product link', { exact: true }).fill('https://shop.example/opt-out');
+		await expect.poll(() => assists).toEqual([false]);
+	} finally {
+		release();
+		await context.close();
+	}
+});
+
 test('prefills editable source details and privately imports the picture, then confirms selected saved fields only', async ({
 	browser
 }) => {
@@ -324,7 +525,7 @@ test('prefills editable source details and privately imports the picture, then c
 		await expect(
 			page.getByRole('heading', { name: 'Product identification', exact: true })
 		).toBeVisible();
-		await expect(page.getByLabel('Enable paid image identification')).not.toBeChecked();
+		await expect(page.getByLabel('Enable AI help and paid image identification')).not.toBeChecked();
 		await page.getByLabel('Monthly allowance (USD)').fill('2.50');
 		await page.getByRole('button', { name: 'Save settings', exact: true }).click();
 		await expect(page.getByText('Identification settings saved.', { exact: true })).toBeVisible();
@@ -356,7 +557,9 @@ test('saves one link-only idea when the retailer cannot fill in its details', as
 		await page.goto(origin + '/capture?list=visible');
 		await expect(page.getByRole('checkbox', { name: /Birthday/ })).toBeChecked();
 		await page.getByLabel('Product link', { exact: true }).fill('https://shop.example/only-link');
-		await expect(page.getByText('This shop could not be reached.', { exact: false })).toBeVisible();
+		await expect(
+			page.getByText("We couldn't read this shop page.", { exact: false })
+		).toBeVisible();
 		await page.getByRole('button', { name: 'Save idea', exact: true }).click();
 		await expect(page.getByRole('heading', { name: 'Idea saved', exact: true })).toBeVisible();
 		const href = await page
@@ -395,8 +598,8 @@ test('saves a photo-only idea with a placeholder name and keeps its picture', as
 		await page.getByRole('button', { name: 'Save idea', exact: true }).click();
 		await expect(page.getByRole('heading', { name: 'Idea saved', exact: true })).toBeVisible();
 		await page.getByRole('link', { name: 'View idea', exact: true }).click();
-		await expect(page.getByRole('heading', { name: 'Untitled idea', exact: true })).toBeVisible();
-		const photo = page.getByRole('img', { name: 'Untitled idea', exact: true });
+		await expect(page.getByRole('heading', { name: 'Photo idea', exact: true })).toBeVisible();
+		const photo = page.getByRole('img', { name: 'Photo idea', exact: true });
 		await expect(photo).toBeVisible();
 		const source = await photo.getAttribute('src');
 		expect(source).toBeTruthy();

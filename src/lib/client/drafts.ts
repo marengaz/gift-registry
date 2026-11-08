@@ -15,6 +15,7 @@ export type LocalDraft = {
 	draft: CaptureDraft;
 	status: DraftStatus;
 	readyToSync?: boolean;
+	incomingShare?: boolean;
 	createdAt: number;
 	updatedAt: number;
 	attemptedAt?: number;
@@ -88,6 +89,7 @@ export class DraftStore extends Dexie {
 		editorToken?: string;
 		preserve?: boolean;
 		submit?: boolean;
+		incomingShare?: boolean;
 	}) {
 		// Svelte's reactive values are copied before entering IndexedDB structured cloning.
 		const draft = copy(input.draft);
@@ -115,6 +117,7 @@ export class DraftStore extends Dexie {
 				draft,
 				status: 'local',
 				readyToSync: input.submit ?? true,
+				incomingShare: input.incomingShare ?? previous?.incomingShare,
 				createdAt: previous?.createdAt ?? now,
 				updatedAt: now,
 				editorToken: input.editorToken
@@ -151,6 +154,19 @@ export class DraftStore extends Dexie {
 				(item) =>
 					new File([item.blob], item.name, { type: item.type, lastModified: item.lastModified })
 			);
+		});
+	}
+	async firstPhoto(id: string, ownerId: string | null) {
+		return this.transaction('r', this.drafts, this.blobs, async () => {
+			if (!(await this.get(id, ownerId)))
+				throw new Error('This draft is not available to this account.');
+			const item = await this.blobs
+				.where('[draftId+position]')
+				.between([id, Dexie.minKey], [id, Dexie.maxKey])
+				.first();
+			return item
+				? new File([item.blob], item.name, { type: item.type, lastModified: item.lastModified })
+				: undefined;
 		});
 	}
 	async beginIdentityRefresh() {
@@ -287,6 +303,7 @@ export class DraftStore extends Dexie {
 				draft,
 				status: 'local',
 				readyToSync: false,
+				incomingShare: false,
 				editorToken: undefined,
 				message: undefined,
 				updatedAt: Date.now()

@@ -104,9 +104,7 @@ for (const failure of [503, 'stall', 'body-stall'] as const) {
 			await context.setOffline(true);
 			await page.getByLabel('Title', { exact: true }).fill('Kept during the server restart');
 			await page.getByRole('button', { name: 'Save on this device', exact: true }).click();
-			await expect(
-				page.getByRole('heading', { name: 'Saved on this device', exact: true })
-			).toBeVisible();
+			await expect(page.getByRole('heading', { name: 'Draft', exact: true })).toBeVisible();
 			const id = await page.evaluate(async () => {
 				const db = await new Promise<IDBDatabase>((resolve, reject) => {
 					const open = indexedDB.open('family-gift-captures');

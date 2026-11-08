@@ -128,6 +128,21 @@ async function finishImageBody(page: Page) {
 	).toBeEnabled();
 }
 
+test('undoes autofill without a delayed shop photo reappearing', async ({ browser }) => {
+	const context = await browser.newContext({ extraHTTPHeaders: { 'x-forwarded-proto': 'http' } });
+	const page = await context.newPage();
+	try {
+		await delayImageBody(page);
+		await expect(page.getByLabel('Title', { exact: true })).toHaveValue('Retailer train');
+		await page.getByRole('button', { name: 'Undo autofill', exact: true }).click();
+		await expect(page.getByLabel('Title', { exact: true })).toHaveValue('');
+		await finishImageBody(page);
+		await expect(page.getByText('retailer-image.webp', { exact: false })).toHaveCount(0);
+	} finally {
+		await context.close();
+	}
+});
+
 test('keeps a manually selected photo while the imported image body is delayed', async ({
 	browser
 }) => {

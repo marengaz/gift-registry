@@ -4,10 +4,15 @@ import type { DatabaseConnection } from '../db/client';
 import { apiResponse, assertSameOrigin } from '../http';
 import { allowanceSummary, updateIdentificationSettings } from './allowance';
 import { visionConfiguration } from './vision';
+import { getGeminiStatus } from './gemini';
 export function identificationGet(connection: DatabaseConnection, event: CatalogueEvent) {
 	return apiResponse(() => {
 		requireAdministrator(connection, event.locals.actor);
-		return { ...allowanceSummary(connection), provider: visionConfiguration() };
+		return {
+			...allowanceSummary(connection),
+			provider: visionConfiguration(),
+			gemini: getGeminiStatus(connection)
+		};
 	});
 }
 export function identificationPost(connection: DatabaseConnection, event: CatalogueEvent) {
@@ -18,7 +23,11 @@ export function identificationPost(connection: DatabaseConnection, event: Catalo
 			.transaction(() => {
 				requireAdministrator(connection, event.locals.actor);
 				updateIdentificationSettings(connection, input);
-				return { ...allowanceSummary(connection), provider: visionConfiguration() };
+				return {
+					...allowanceSummary(connection),
+					provider: visionConfiguration(),
+					gemini: getGeminiStatus(connection)
+				};
 			})
 			.immediate();
 	});

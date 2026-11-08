@@ -1,7 +1,8 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import MetadataPrefill from './MetadataPrefill.svelte';
-	import BrowserCaptureHelp from './BrowserCaptureHelp.svelte';
+	import ImageCaptureTools from './ImageCaptureTools.svelte';
+	import { markEdited } from '#lib/client/capture-autofill.ts';
 	import type { CaptureDraft, GiftList } from '#lib/catalogue-types.ts';
 	let {
 		draft = $bindable(),
@@ -12,6 +13,9 @@
 		locked = false,
 		localCapture = false,
 		canSynchronise = true,
+		addingAs = '',
+		onKeep,
+		onEnsureLocal,
 		onSave,
 		onListsChanged
 	}: {
@@ -23,12 +27,16 @@
 		locked?: boolean;
 		localCapture?: boolean;
 		canSynchronise?: boolean;
+		addingAs?: string;
+		onKeep?: () => void;
+		onEnsureLocal?: () => Promise<void>;
 		onSave: () => void;
 		onListsChanged?: () => void;
 	} = $props();
 	let online = $state(true);
 	let validation = $state('');
-	let previews = $state<{ name: string; url: string }[]>([]);
+	let showText = $state(false);
+	let listSearch = $state('');
 	const localOnly = $derived(localCapture && (!online || !canSynchronise));
 	const saveLabel = $derived.by(() => {
 		if (busy) return 'Saving…';
@@ -52,13 +60,6 @@
 			window.removeEventListener('offline', update);
 		};
 	});
-	$effect(() => {
-		const pictures = photos.map((file) => ({ name: file.name, url: URL.createObjectURL(file) }));
-		previews = pictures;
-		return () => {
-			for (const picture of pictures) URL.revokeObjectURL(picture.url);
-		};
-	});
 	function submit() {
 		if (
 			!draft.title.trim() &&
@@ -78,6 +79,7 @@
 
 <form
 	class="editor panel"
+	class:capturing={localCapture}
 	aria-label={editing ? 'Edit idea' : 'One gift idea'}
 	novalidate={localCapture}
 	onsubmit={(event) => {
@@ -98,11 +100,29 @@
 				placeholder="Paste a shop or social media link"
 			/></label
 		>
-		{#if !editing}<MetadataPrefill bind:draft bind:photos disabled={locked || busy} />{/if}
-		{#if !editing}<BrowserCaptureHelp />{/if}
+		{#if !editing}<MetadataPrefill
+				bind:draft
+				bind:photos
+				disabled={locked || busy}
+				ensureLocal={onEnsureLocal}
+			/>{/if}
+		{#if !editing}<button
+				type="button"
+				class="quiet"
+				onclick={() => {
+					showText = !showText;
+				}}>Paste text</button
+			>{/if}
+		{#if showText}<label
+				>Text to read<textarea
+					rows="3"
+					bind:value={draft.sourceText}
+					placeholder="Paste a caption, product description or message"></textarea></label
+			>{/if}
 		<label
 			>Title <input
 				bind:value={draft.title}
+				oninput={() => markEdited(draft, 'title')}
 				placeholder="Optional — we’ll try to find this from your link"
 			/></label
 		>
@@ -114,22 +134,38 @@
 					multiple
 					onchange={(event) => {
 						const input = event.target as HTMLInputElement;
-						photos = Array.from(input.files ?? []);
+						const added = Array.from(input.files ?? []);
+						photos = [
+							...photos.filter((file) => !added.some((next) => next.name === file.name)),
+							...added
+						];
+						markEdited(draft, 'photos');
 						if (draft.browserCapture) draft.browserCapture.imageUrl = '';
 						input.value = '';
 					}}
 				/>
 				<small>JPEG, PNG or WebP recommended. Up to 12 MB and 30 megapixels per photo.</small>
 			</label>
-			{#if previews.length}<ul class="photo-previews">
-					{#each previews as picture, index}<li>
-							<img src={picture.url} alt={picture.name} />
+			{#if photos.length}<ul class="photo-previews">
+					{#each photos as picture, index}<li>
+							<ImageCaptureTools
+								file={picture}
+								disabled={locked || busy}
+								onReplace={(replacement) => {
+									photos = photos.map((file, position) =>
+										position === index ? replacement : file
+									);
+									markEdited(draft, 'photos');
+									if (draft.browserCapture) draft.browserCapture.imageUrl = '';
+								}}
+							/>
 							<span>{picture.name}</span>
 							<button
 								type="button"
 								class="quiet"
 								aria-label={`Remove ${picture.name}`}
 								onclick={() => {
+									markEdited(draft, 'photos');
 									if (draft.browserCapture) draft.browserCapture.imageUrl = '';
 									photos = photos.filter((_, position) => position !== index);
 								}}>Remove photo</button
@@ -142,12 +178,14 @@
 			>Description <textarea
 				rows="2"
 				bind:value={draft.description}
+				oninput={() => markEdited(draft, 'description')}
 				placeholder="Anything you want to remember about this idea"></textarea></label
 		>
 		<label
 			>Estimated price (£) <input
 				inputmode="decimal"
 				bind:value={draft.estimate}
+				oninput={() => markEdited(draft, 'estimate')}
 				placeholder="Unknown"
 				disabled={editing}
 			/>
@@ -155,12 +193,19 @@
 		</label>
 		<fieldset class="list-selection">
 			<legend>Choose lists</legend>
+			{#if lists.length > 6}<label
+					>Find a list<input
+						type="search"
+						bind:value={listSearch}
+						placeholder="Child, occasion or list name"
+					/></label
+				>{/if}
 			<p class="muted">
 				An idea can be on several lists. Leave these unselected to keep it in your inbox.
 			</p>
-			{#each lists.filter((list) => !list.archivedAt || draft.listIds.includes(list.id)) as list}<div
-					class="list-choice"
-				>
+			{#each lists.filter((list) => (!list.archivedAt || draft.listIds.includes(list.id)) && (!listSearch || (list.recipientName + ' ' + list.name + ' ' + (list.occasion ?? ''))
+							.toLowerCase()
+							.includes(listSearch.toLowerCase()))) as list}<div class="list-choice">
 					<label class="check-label"
 						><input
 							type="checkbox"
@@ -190,6 +235,7 @@
 			<label
 				>Variant or size <input
 					bind:value={draft.variant}
+					oninput={() => markEdited(draft, 'variant')}
 					placeholder="Colour, size or edition"
 				/></label
 			>
@@ -207,7 +253,10 @@
 			<p class="muted">
 				Optional shopping links for this same idea. Keep foreign prices in their original currency.
 			</p>
-			{#each draft.offers as offer, index}<div class="shopping-row">
+			{#each draft.offers as offer, index}<div
+					class="shopping-row"
+					oninput={() => markEdited(draft, 'offers')}
+				>
 					<label>Retailer <input bind:value={offer.retailer} placeholder="Shop name" /></label>
 					<label>Link <input type="url" bind:value={offer.url} placeholder="https://…" /></label>
 					<div class="form-grid">
@@ -231,6 +280,7 @@
 						type="button"
 						class="quiet"
 						onclick={() => {
+							markEdited(draft, 'offers');
 							draft.offers = draft.offers.filter((_, position) => position !== index);
 						}}>Remove link</button
 					>
@@ -239,13 +289,21 @@
 				type="button"
 				class="secondary"
 				onclick={() => {
+					markEdited(draft, 'offers');
 					draft.offers = [...draft.offers, { url: '', retailer: '', price: '', currency: 'GBP' }];
 				}}>Add shopping link</button
 			>
 		</details>
 		{#if validation}<p class="notice error" role="alert">{validation}</p>{/if}
 		<div class="form-actions">
+			{#if onKeep && !editing}<button
+					type="button"
+					class="secondary"
+					disabled={busy || !!photoError}
+					onclick={onKeep}>Keep for later</button
+				>{/if}
 			<button disabled={busy || !!photoError}>{saveLabel}</button>
+			{#if addingAs && !editing}<span class="muted">Adding as {addingAs}</span>{/if}
 			<span class="muted"
 				>{editing
 					? 'Changes apply to the shared product.'
@@ -258,6 +316,20 @@
 </form>
 
 <style>
+	.capturing .form-actions {
+		position: sticky;
+		bottom: max(0.5rem, env(safe-area-inset-bottom));
+		z-index: 3;
+		background: var(--paper, #fff);
+		padding: 0.8rem;
+		border: 1px solid var(--line);
+		border-radius: 0.65rem;
+		box-shadow: 0 2px 12px #213b4310;
+	}
+	.capturing input,
+	.capturing textarea {
+		scroll-margin-bottom: 10rem;
+	}
 	.draft-fields,
 	.list-selection {
 		min-width: 0;
@@ -292,17 +364,8 @@
 		gap: 1rem;
 	}
 	.photo-previews li {
-		width: 8rem;
+		width: min(100%, 22rem);
 		overflow-wrap: anywhere;
 		font-size: 0.85rem;
-	}
-	.photo-previews img {
-		display: block;
-		width: 8rem;
-		height: 7rem;
-		object-fit: contain;
-		border: 1px solid var(--line);
-		border-radius: 0.5rem;
-		margin-bottom: 0.4rem;
 	}
 </style>

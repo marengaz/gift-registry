@@ -130,6 +130,7 @@ test('keeps offline photos and lists across a closed page and synchronises once 
 		});
 		await page.goto(origin + '/capture?list=visible');
 		await expect(page.getByLabel('Title', { exact: true })).toBeVisible();
+		await expect(page.getByRole('button', { name: 'Save idea', exact: true })).toBeEnabled();
 		await context.setOffline(true);
 		await page.getByLabel('Title', { exact: true }).fill('Offline photo train');
 		await page.getByText('More details', { exact: true }).click();
@@ -141,9 +142,7 @@ test('keeps offline photos and lists across a closed page and synchronises once 
 			.getByLabel('Photos')
 			.setInputFiles({ name: 'offline-train.png', mimeType: 'image/png', buffer: png });
 		await page.getByRole('button', { name: 'Save on this device', exact: true }).click();
-		await expect(
-			page.getByRole('heading', { name: 'Saved on this device', exact: true })
-		).toBeVisible();
+		await expect(page.getByRole('heading', { name: 'Waiting to send', exact: true })).toBeVisible();
 		const record = (await localRecords(page)).find(
 			(record) => record.draft.title === 'Offline photo train'
 		)!;
@@ -249,7 +248,7 @@ test('retains a new offline draft if sign-out takes longer than its local lease'
 		await capturing.getByLabel('Title', { exact: true }).fill('Captured during slow sign-out');
 		await capturing.getByRole('button', { name: 'Save on this device', exact: true }).click();
 		await expect(
-			capturing.getByRole('heading', { name: 'Saved on this device', exact: true })
+			capturing.getByRole('heading', { name: 'Waiting to send', exact: true })
 		).toBeVisible();
 		const record = (await localRecords(capturing))[0];
 		expect(record.ownerId).toBe('guest');

@@ -1,4 +1,3 @@
-import collector from './browser-product.js?raw';
 import { emptyDraft, parsePriceMinor, priceInput, type CaptureDraft } from '../catalogue-types';
 import { draftStore } from './drafts';
 
@@ -21,9 +20,6 @@ function httpsUrl(value: unknown): string {
 	} catch {
 		return '';
 	}
-}
-export function browserCaptureButton(origin: string): string {
-	return `javascript:(${collector.trim()})(${JSON.stringify(new URL('/capture', origin).href)});void 0`;
 }
 export function parseBrowserCapture(hash: string): CaptureDraft {
 	const invalid = () =>
