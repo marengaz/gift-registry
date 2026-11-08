@@ -56,6 +56,7 @@ describe('incoming shares', () => {
 		data.append('photos', new File(['photo bytes'], 'window.jpg', { type: 'image/jpeg' }));
 		const imported = await importShare(data, db);
 		expect(imported.ownerId).toBeNull();
+		expect(imported.readyToSync).toBe(false);
 		expect((await db.get(imported.id, null))?.draft.title).toBe('Window display');
 		expect(await (await db.files(imported.id, null))[0].text()).toBe('photo bytes');
 		expect(await db.list('person-a')).toEqual([]);

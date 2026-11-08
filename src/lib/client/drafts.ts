@@ -14,6 +14,7 @@ export type LocalDraft = {
 	operationId: string;
 	draft: CaptureDraft;
 	status: DraftStatus;
+	readyToSync?: boolean;
 	createdAt: number;
 	updatedAt: number;
 	attemptedAt?: number;
@@ -86,6 +87,7 @@ export class DraftStore extends Dexie {
 		photos: File[];
 		editorToken?: string;
 		preserve?: boolean;
+		submit?: boolean;
 	}) {
 		// Svelte's reactive values are copied before entering IndexedDB structured cloning.
 		const draft = copy(input.draft);
@@ -112,6 +114,7 @@ export class DraftStore extends Dexie {
 				operationId: previous?.operationId ?? crypto.randomUUID(),
 				draft,
 				status: 'local',
+				readyToSync: input.submit ?? true,
 				createdAt: previous?.createdAt ?? now,
 				updatedAt: now,
 				editorToken: input.editorToken
@@ -214,6 +217,93 @@ export class DraftStore extends Dexie {
 			return adopted;
 		});
 	}
+	async attachIncoming(
+		incomingId: string,
+		targetId: string,
+		expectedOwnerId: string | null
+	): Promise<LocalDraft> {
+		if (incomingId === targetId) throw new Error('Choose a different unfinished idea.');
+		const locks = browserLocks();
+		if (!locks) return this.attachIncomingUnlocked(incomingId, targetId, expectedOwnerId, false);
+		const ids = [incomingId, targetId].sort();
+		return locks.request(editorKey(this.name, ids[0]), { ifAvailable: true }, (first) => {
+			if (!first)
+				throw new Error('This idea is being edited in another tab. Close it and try again.');
+			return locks.request(editorKey(this.name, ids[1]), { ifAvailable: true }, (second) => {
+				if (!second)
+					throw new Error('This idea is being edited in another tab. Close it and try again.');
+				return this.attachIncomingUnlocked(incomingId, targetId, expectedOwnerId, true);
+			});
+		});
+	}
+	private async attachIncomingUnlocked(
+		incomingId: string,
+		targetId: string,
+		expectedOwnerId: string | null,
+		exclusive: boolean
+	) {
+		return this.transaction('rw', this.drafts, this.blobs, this.context, async () => {
+			const active = await this.current();
+			if (
+				expectedOwnerId &&
+				(active?.ownerId !== expectedOwnerId || (!active.administrator && !active.lists.length))
+			)
+				throw new Error('The account changed. Reopen the idea with its original account.');
+			if ((active?.logoutUntil ?? 0) > Date.now())
+				throw new Error('Sign-out is in progress. Cancel it before continuing this idea.');
+			const incoming = await this.get(incomingId, null);
+			const target = await this.get(targetId, expectedOwnerId);
+			if (!incoming || !target)
+				throw new Error('This unfinished idea is not available to this account.');
+			for (const record of [incoming, target]) {
+				if (
+					record.attemptedAt ||
+					['queued', 'syncing', 'saved'].includes(record.status) ||
+					(record.readyToSync !== false && record.draft.browserCapture?.pendingReview !== true) ||
+					(record.leaseUntil ?? 0) > Date.now()
+				)
+					throw new Error('Choose an unfinished idea that has not been saved or started sending.');
+				if (!exclusive && record.editorToken)
+					throw new Error('This idea is being edited in another tab. Close it and try again.');
+			}
+			const draft = copy(target.draft);
+			const evidence = [draft.sourceText];
+			for (const part of [
+				incoming.draft.sourceText,
+				incoming.draft.sourceUrl !== draft.sourceUrl ? incoming.draft.sourceUrl : '',
+				incoming.draft.title,
+				incoming.draft.description,
+				incoming.draft.variant
+			]) {
+				if (part.trim() && !evidence.some((kept) => kept.includes(part))) evidence.push(part);
+			}
+			draft.sourceText = evidence.filter(Boolean).join('\n\n');
+			if (!draft.sourceUrl.trim()) draft.sourceUrl = incoming.draft.sourceUrl;
+			const photos = await this.blobs.where('draftId').equals(target.id).toArray();
+			const addedPhotos = await this.blobs.where('draftId').equals(incoming.id).sortBy('position');
+			const position = photos.reduce((last, photo) => Math.max(last, photo.position), -1) + 1;
+			const merged: LocalDraft = {
+				...target,
+				draft,
+				status: 'local',
+				readyToSync: false,
+				editorToken: undefined,
+				message: undefined,
+				updatedAt: Date.now()
+			};
+			await this.drafts.put(merged);
+			await this.blobs.bulkPut(
+				addedPhotos.map((photo, index) => ({
+					...photo,
+					draftId: target.id,
+					position: position + index
+				}))
+			);
+			await this.blobs.where('draftId').equals(incoming.id).delete();
+			await this.drafts.delete(incoming.id);
+			return merged;
+		});
+	}
 	async lockEditor(
 		id: string,
 		ownerId: string | null,
@@ -276,6 +366,7 @@ export class DraftStore extends Dexie {
 			if (
 				!record ||
 				record.status === 'saved' ||
+				record.readyToSync === false ||
 				record.draft.browserCapture?.pendingReview === true ||
 				(record.leaseUntil ?? 0) > Date.now() ||
 				(!exclusive && !!record.editorToken)

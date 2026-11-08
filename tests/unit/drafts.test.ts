@@ -156,6 +156,189 @@ describe('durable capture drafts', () => {
 	});
 });
 
+describe('unfinished capture drafts', () => {
+	it('keeps unfinished drafts across reopening without uploading until an explicit save', async () => {
+		const db = store();
+		await db.remember(person('a'));
+		const kept = await db.save({ ownerId: 'a', draft: draft(), photos: [], submit: false });
+		db.close();
+		const reopened = new DraftStore(db.name);
+		expect((await reopened.get(kept.id, 'a'))?.readyToSync).toBe(false);
+		const requests: string[] = [];
+		await syncDrafts(reopened, async (url) => {
+			requests.push(String(url));
+			return Response.json(person('a'));
+		});
+		expect(requests).toEqual(['/api/me']);
+		expect((await reopened.get(kept.id, 'a'))?.attemptedAt).toBeUndefined();
+		const submitted = await reopened.save({
+			id: kept.id,
+			ownerId: 'a',
+			draft: draft(),
+			photos: [],
+			submit: true
+		});
+		expect(submitted.operationId).toBe(kept.operationId);
+		expect(await reopened.claim(kept.id, 'a')).toMatchObject({ status: 'syncing' });
+		reopened.close();
+	});
+	it('does not let account adoption publish an unfinished share', async () => {
+		const db = store();
+		const kept = await db.save({ ownerId: null, draft: draft(), photos: [], submit: false });
+		await db.adopt(kept.id, person('a'));
+		expect((await db.get(kept.id, 'a'))?.readyToSync).toBe(false);
+		expect(await db.claim(kept.id, 'a')).toBeUndefined();
+		db.close();
+	});
+	it('continues to send legacy explicitly saved drafts without a readiness field', async () => {
+		const db = store();
+		const kept = await db.save({ ownerId: 'a', draft: draft(), photos: [] });
+		await db.drafts.update(kept.id, { readyToSync: undefined });
+		expect(await db.claim(kept.id, 'a')).toMatchObject({ operationId: kept.operationId });
+		db.close();
+	});
+});
+
+describe('continuing an idea with incoming material', () => {
+	it('appends incoming evidence and photos while retaining target details, lists and operation', async () => {
+		const db = store();
+		await db.remember(person('a'));
+		const target = await db.save({
+			ownerId: 'a',
+			draft: {
+				...draft(),
+				sourceUrl: 'https://shop.example/train',
+				sourceText: 'Original evidence',
+				description: 'My carefully edited description'
+			},
+			photos: [new File(['original photo'], 'original.jpg', { type: 'image/jpeg' })],
+			submit: false
+		});
+		const incoming = await db.save({
+			ownerId: null,
+			draft: {
+				...emptyDraft(),
+				title: 'Screenshot of the train',
+				sourceUrl: 'https://shop.example/second',
+				sourceText: 'Original evidence'
+			},
+			photos: [new File(['new screenshot'], 'screen.png', { type: 'image/png' })],
+			submit: false
+		});
+		const merged = await db.attachIncoming(incoming.id, target.id, 'a');
+		expect(merged).toMatchObject({
+			id: target.id,
+			ownerId: 'a',
+			operationId: target.operationId,
+			readyToSync: false,
+			draft: {
+				title: 'A train',
+				description: 'My carefully edited description',
+				sourceUrl: 'https://shop.example/train',
+				listIds: ['birthday']
+			}
+		});
+		expect(merged.draft.sourceText.match(/Original evidence/g)).toHaveLength(1);
+		expect(merged.draft.sourceText).toContain('https://shop.example/second');
+		expect(merged.draft.sourceText).toContain('Screenshot of the train');
+		const files = await db.files(target.id, 'a');
+		expect(files.map((file) => file.name)).toEqual(['original.jpg', 'screen.png']);
+		expect(await files[1].text()).toBe('new screenshot');
+		expect(await db.get(incoming.id, null)).toBeUndefined();
+		expect(await db.claim(target.id, 'a')).toBeUndefined();
+		db.close();
+	});
+	it('fills only a missing source link without transferring an unbound draft to the remembered account', async () => {
+		const db = store();
+		await db.remember(person('a'));
+		const target = await db.save({ ownerId: null, draft: draft(), photos: [], submit: false });
+		const incoming = await db.save({
+			ownerId: null,
+			draft: { ...emptyDraft(), sourceUrl: 'https://shop.example/train' },
+			photos: [],
+			submit: false
+		});
+		const merged = await db.attachIncoming(incoming.id, target.id, null);
+		expect(merged.ownerId).toBeNull();
+		expect(merged.draft.sourceUrl).toBe('https://shop.example/train');
+		expect(await db.list('a')).toEqual([]);
+		db.close();
+	});
+	it('rolls the whole attachment back if storage cannot keep the added photo', async () => {
+		const db = store();
+		await db.remember(person('a'));
+		const target = await db.save({ ownerId: 'a', draft: draft(), photos: [], submit: false });
+		const incoming = await db.save({
+			ownerId: null,
+			draft: { ...emptyDraft(), sourceText: 'New evidence' },
+			photos: [new File(['screenshot'], 'screen.png', { type: 'image/png' })],
+			submit: false
+		});
+		db.blobs.hook('creating', (_key, value) => {
+			if (value.draftId === target.id) throw new DOMException('Storage full', 'QuotaExceededError');
+		});
+		await expect(db.attachIncoming(incoming.id, target.id, 'a')).rejects.toThrow('Storage full');
+		expect(await db.get(target.id, 'a')).toEqual(target);
+		expect(await db.get(incoming.id, null)).toEqual(incoming);
+		expect(await (await db.files(incoming.id, null))[0].text()).toBe('screenshot');
+		expect(await db.files(target.id, 'a')).toEqual([]);
+		db.close();
+	});
+	it('checks the current account again before attaching to an account-owned target', async () => {
+		const db = store();
+		await db.remember(person('a'));
+		const target = await db.save({ ownerId: 'a', draft: draft(), photos: [], submit: false });
+		const incoming = await db.save({ ownerId: null, draft: draft(), photos: [], submit: false });
+		await db.remember(person('b'));
+		await expect(db.attachIncoming(incoming.id, target.id, 'a')).rejects.toThrow(/account/i);
+		expect(await db.get(incoming.id, null)).toBeDefined();
+		expect(await db.get(target.id, 'a')).toEqual(target);
+		db.close();
+	});
+	it('cannot consume incoming material that is already owned by another account', async () => {
+		const db = store();
+		await db.remember(person('a'));
+		const target = await db.save({ ownerId: 'a', draft: draft(), photos: [], submit: false });
+		const incoming = await db.save({ ownerId: 'b', draft: draft(), photos: [], submit: false });
+		await expect(db.attachIncoming(incoming.id, target.id, 'a')).rejects.toThrow(/account/i);
+		expect(await db.get(incoming.id, 'b')).toEqual(incoming);
+		expect(await db.get(target.id, 'a')).toEqual(target);
+		db.close();
+	});
+	it.each([
+		{ name: 'an explicitly saved idea', submit: true, attempt: false },
+		{ name: 'a frozen upload', submit: true, attempt: true }
+	])('keeps both drafts when the target is $name', async ({ submit, attempt }) => {
+		const db = store();
+		await db.remember(person('a'));
+		const target = await db.save({ ownerId: 'a', draft: draft(), photos: [], submit });
+		if (attempt) await db.claim(target.id, 'a');
+		const incoming = await db.save({ ownerId: null, draft: draft(), photos: [], submit: false });
+		await expect(db.attachIncoming(incoming.id, target.id, 'a')).rejects.toThrow(
+			/unfinished|saved|sending/i
+		);
+		expect(await db.get(incoming.id, null)).toBeDefined();
+		expect((await db.get(target.id, 'a'))?.operationId).toBe(target.operationId);
+		db.close();
+	});
+	it.each([
+		{ backend: 'browser lock', fallback: false },
+		{ backend: 'persisted fallback token', fallback: true }
+	])('does not attach through another open editor using $backend', async ({ fallback }) => {
+		if (fallback) vi.stubGlobal('navigator', {});
+		const db = store();
+		await db.remember(person('a'));
+		const target = await db.save({ ownerId: 'a', draft: draft(), photos: [], submit: false });
+		const incoming = await db.save({ ownerId: null, draft: draft(), photos: [], submit: false });
+		const release = await db.lockEditor(target.id, 'a', 'another-editor');
+		await expect(db.attachIncoming(incoming.id, target.id, 'a')).rejects.toThrow(/edited|tab/i);
+		expect(await db.get(incoming.id, null)).toBeDefined();
+		await release!();
+		expect((await db.attachIncoming(incoming.id, target.id, 'a')).id).toBe(target.id);
+		db.close();
+	});
+});
+
 describe('sign-out coordination', () => {
 	it('persists a sign-out pause so another tab cannot claim or edit drafts during logout', async () => {
 		const db = store();
