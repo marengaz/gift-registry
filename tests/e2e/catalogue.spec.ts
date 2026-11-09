@@ -98,6 +98,10 @@ test('administrator organises, captures with photo, edits and searches at deskto
 	await expect(page.getByRole('heading', { name: 'Test niece', exact: true })).toBeVisible();
 	await page.getByRole('link', { name: /Birthday 2027 Test niece/ }).click();
 	await page.getByRole('link', { name: '+ Add an idea' }).click();
+	await expect(
+		page.getByRole('checkbox', { name: 'Test niece · Birthday ideas Birthday 2027', exact: true })
+	).toBeChecked();
+	await expect(page.getByRole('button', { name: 'Save idea', exact: true })).toBeEnabled();
 	await page.getByLabel('Title', { exact: true }).fill('Woodland puzzle');
 	await page.getByLabel('Estimated price (£)', { exact: true }).fill('18.50');
 	await page.getByText('More details', { exact: true }).click();
@@ -179,9 +183,10 @@ test('contributor keeps an invalid-photo draft and sees only permitted lists wit
 		expect(html).not.toContain('Test niece');
 		expect(html).not.toContain('Woodland puzzle');
 		await page.goto(origin + '/capture');
-		await page.getByLabel('Title', { exact: true }).fill('Keep this draft');
 		await expect(page.getByRole('checkbox', { name: /Child · Birthday/ })).toBeVisible();
 		await expect(page.getByRole('checkbox', { name: /Christmas/ })).toHaveCount(0);
+		await expect(page.getByRole('button', { name: 'Save idea', exact: true })).toBeEnabled();
+		await page.getByLabel('Title', { exact: true }).fill('Keep this draft');
 		await page
 			.getByLabel('Photos')
 			.setInputFiles({ name: 'broken.png', mimeType: 'image/png', buffer: Buffer.from('<svg/>') });
