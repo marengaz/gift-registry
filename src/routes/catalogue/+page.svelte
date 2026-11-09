@@ -12,11 +12,17 @@
 		<div>
 			<p class="eyebrow">The complete collection</p>
 			<h1>Catalogue</h1>
-			<p class="muted">Find an idea, check its lists and keep the details useful.</p>
+			<p class="muted">Select ideas to add to lists, or organise one idea at a time.</p>
 		</div>
 		<a class="button" href="/capture">+ Add an idea</a>
 	</div>
-	<IdeaCollection products={data.products as Product[]} lists={data.lists} kind="catalogue">
+	<IdeaCollection
+		products={data.products as Product[]}
+		lists={data.lists}
+		kind="catalogue"
+		administrator={data.administrator}
+		catalogueStatus={data.catalogueStatus}
+	>
 		<section class="empty-state">
 			<div class="empty-symbol" aria-hidden="true">✧</div>
 			<h2>{page.url.search ? 'No matching ideas' : 'Your collection starts here'}</h2>

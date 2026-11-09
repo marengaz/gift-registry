@@ -2,6 +2,8 @@
 	import { onMount, type Snippet } from 'svelte';
 	import { page } from '$app/state';
 	import ProductCard from './ProductCard.svelte';
+	import CatalogueActions from './CatalogueActions.svelte';
+	import type { CatalogueActionStatus } from '#lib/shared/catalogue-actions.ts';
 	import { ideaRows, filterIdeas, type CollectionKind } from '#lib/idea-collection.ts';
 	import type { GiftList, Product } from '#lib/catalogue-types.ts';
 	let {
@@ -10,7 +12,8 @@
 		kind,
 		listId,
 		administrator = false,
-		children
+		children,
+		catalogueStatus
 	}: {
 		products: Product[];
 		lists: GiftList[];
@@ -18,6 +21,7 @@
 		listId?: string;
 		administrator?: boolean;
 		children?: Snippet;
+		catalogueStatus?: CatalogueActionStatus;
 	} = $props();
 	let compact = $state(false);
 	const preference = 'family-gifts-idea-view';
@@ -189,22 +193,46 @@
 	</div>
 </form>
 
-{#if visible.length}
-	<div class={compact ? 'product-rows' : 'product-grid'}>
-		{#each visible as row (row.entry?.id ?? row.product.id)}<ProductCard
-				product={row.product}
-				{lists}
-				listId={row.entry?.listId}
-				buying={kind === 'list' || kind === 'mine'}
-				{administrator}
-				{compact}
-			/>{/each}
-	</div>
-{:else if filtered}<section class="empty-state">
-		<h2>No matching ideas</h2>
-		<p class="muted">Try another search or loosen a filter.</p>
-	</section>
-{:else}{@render children?.()}{/if}
+{#snippet collection(controls?: {
+	selected: string[];
+	disabled: boolean;
+	toggle: (id: string) => void;
+	add: (ids: string[]) => void;
+	remove: (ids: string[]) => void;
+})}
+	{#if visible.length}
+		<div class={compact ? 'product-rows' : 'product-grid'}>
+			{#each visible as row (row.entry?.id ?? row.product.id)}<ProductCard
+					product={row.product}
+					{lists}
+					listId={row.entry?.listId}
+					buying={kind === 'list' || kind === 'mine'}
+					{administrator}
+					{compact}
+					catalogue={controls
+						? {
+								selected: controls.selected.includes(row.product.id),
+								disabled: controls.disabled,
+								toggle: () => controls.toggle(row.product.id),
+								add: () => controls.add([row.product.id]),
+								remove: () => controls.remove([row.product.id])
+							}
+						: undefined}
+				/>{/each}
+		</div>
+	{:else if filtered}<section class="empty-state">
+			<h2>No matching ideas</h2>
+			<p class="muted">Try another search or loosen a filter.</p>
+		</section>
+	{:else}{@render children?.()}{/if}
+{/snippet}
+{#if kind === 'catalogue' && administrator && catalogueStatus}<CatalogueActions
+		products={visible.map((row) => row.product)}
+		{lists}
+		status={catalogueStatus}
+		filterKey={query.toString()}
+		>{#snippet children(controls)}{@render collection(controls)}{/snippet}</CatalogueActions
+	>{:else}{@render collection()}{/if}
 
 <style>
 	.collection-toolbar {

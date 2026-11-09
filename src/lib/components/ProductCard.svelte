@@ -8,7 +8,8 @@
 		listId,
 		buying = false,
 		administrator = false,
-		compact = false
+		compact = false,
+		catalogue
 	}: {
 		product: Product;
 		lists: GiftList[];
@@ -16,12 +17,30 @@
 		buying?: boolean;
 		administrator?: boolean;
 		compact?: boolean;
+		catalogue?: {
+			selected: boolean;
+			disabled: boolean;
+			toggle: () => void;
+			add: () => void;
+			remove: () => void;
+		};
 	} = $props();
 	const entry = $derived(product.entries.find((e) => e.listId === listId));
 	const memberships = $derived(compact && entry ? [entry] : product.entries);
 </script>
 
 <article class="product-card" class:compact>
+	{#if catalogue}<div class="catalogue-selection">
+			<label
+				><input
+					type="checkbox"
+					aria-label={`Select ${product.title}`}
+					checked={catalogue.selected}
+					disabled={catalogue.disabled}
+					onchange={catalogue.toggle}
+				/><span>Select</span></label
+			>
+		</div>{/if}
 	<a class="card-photo" href={`/products/${product.id}`} aria-label={`Open ${product.title}`}>
 		{#if product.media[0]}<img
 				src={`/api/media/${product.media[0].id}`}
@@ -46,6 +65,27 @@
 					>{/if}{:else}<span class="muted">Unlisted idea</span>{/each}
 		</div>
 		{#if product.contributorName}<p class="attribution">Added by {product.contributorName}</p>{/if}
+		{#if catalogue}<div class="catalogue-card-actions">
+				<button
+					type="button"
+					class="secondary"
+					disabled={catalogue.disabled}
+					onclick={catalogue.add}>Add to lists</button
+				>
+				<details>
+					<summary aria-label={`More actions for ${product.title}`}>•••</summary><button
+						type="button"
+						class="quiet"
+						disabled={catalogue.disabled}
+						onclick={(event) => {
+							const menu = event.currentTarget.closest('details');
+							menu?.removeAttribute('open');
+							menu?.querySelector('summary')?.focus();
+							catalogue.remove();
+						}}>Delete idea</button
+					>
+				</details>
+			</div>{/if}
 		{#if buying && entry}{#key entry.id}<GiftActions
 					{entry}
 					{compact}
@@ -57,6 +97,74 @@
 </article>
 
 <style>
+	.product-card {
+		position: relative;
+	}
+	.catalogue-selection {
+		position: absolute;
+		z-index: 1;
+		top: 0.5rem;
+		left: 0.5rem;
+		background: var(--paper);
+		border-radius: 0.4rem;
+		padding: 0.3rem 0.5rem;
+		box-shadow: 0 1px 5px #172d391a;
+	}
+	.catalogue-selection label {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		margin: 0;
+		font-size: 0.75rem;
+	}
+	.catalogue-selection input {
+		margin: 0;
+	}
+	.catalogue-card-actions {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.5rem;
+		margin-top: 0.8rem;
+	}
+	.catalogue-card-actions button {
+		padding: 0.45rem 0.7rem;
+		font-size: 0.85rem;
+	}
+	.catalogue-card-actions details {
+		position: relative;
+	}
+	.catalogue-card-actions summary {
+		list-style: none;
+		padding: 0.5rem;
+		cursor: pointer;
+		font-weight: bold;
+		min-width: 32px;
+		text-align: center;
+	}
+	.catalogue-card-actions details[open] button {
+		position: absolute;
+		right: 0;
+		bottom: 100%;
+		white-space: nowrap;
+		background: var(--paper);
+		border: 1px solid var(--line);
+		box-shadow: 0 0.3rem 1rem #172d3920;
+		z-index: 2;
+	}
+	.compact .catalogue-selection {
+		position: static;
+		grid-column: 1 / -1;
+		box-shadow: none;
+		border-bottom: 1px solid var(--line);
+		border-radius: 0;
+		padding: 0.35rem 0.7rem;
+	}
+	.compact .catalogue-card-actions {
+		grid-column: 1 / -1;
+		margin-top: 0.35rem;
+		justify-content: flex-start;
+	}
 	.compact {
 		display: grid;
 		grid-template-columns: 80px minmax(0, 1fr);
