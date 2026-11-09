@@ -4,8 +4,9 @@ import { z } from 'zod';
 import type {
 	ListDeleteCommand,
 	ListDeletionAcknowledgement,
-	ListDeletionConflict,
-	ListDeletionImpact
+	ListDeletionFailure,
+	ListDeletionImpact,
+	ListVisibilityFailure
 } from '../shared/list-lifecycle';
 import { AccessError, requireAdministrator } from './access';
 import type { CatalogueEvent } from './catalogue';
@@ -21,17 +22,20 @@ const commandSchema = z.strictObject({
 const fingerprint = (value: unknown) =>
 	createHash('sha256').update(JSON.stringify(value)).digest('hex');
 
-class ListDeletionConflictError extends AccessError {
-	constructor(public result: ListDeletionConflict) {
-		super(409, result.message);
+class ListLifecycleError extends AccessError {
+	constructor(
+		public result: ListDeletionFailure | ListVisibilityFailure,
+		status = 409
+	) {
+		super(status, result.message);
 	}
 }
 
-async function deletionResponse(action: () => unknown | Promise<unknown>) {
+async function lifecycleResponse(action: () => unknown | Promise<unknown>) {
 	try {
 		return privateJson(await action());
 	} catch (error) {
-		if (error instanceof ListDeletionConflictError) return privateJson(error.result, error.status);
+		if (error instanceof ListLifecycleError) return privateJson(error.result, error.status);
 		return apiResponse(() => {
 			throw error;
 		});
@@ -54,7 +58,6 @@ function deletionImpact(connection: DatabaseConnection, administratorId: string,
 		.orderBy(asc(entries.id))
 		.all()
 		.map(({ entry }) => entry);
-	// Join through the target membership instead of binding an unbounded array of idea IDs.
 	const memberships = connection.sqlite
 		.prepare(
 			`SELECT e.product_id AS productId,e.list_id AS listId,e.id AS entryId
@@ -91,7 +94,7 @@ export function listDeletionImpactGet(
 	event: CatalogueEvent,
 	id: string
 ) {
-	return deletionResponse(() =>
+	return lifecycleResponse(() =>
 		connection.sqlite
 			.transaction(() => {
 				const actor = requireAdministrator(connection, event.locals.actor);
@@ -102,7 +105,7 @@ export function listDeletionImpactGet(
 }
 
 export function listDelete(connection: DatabaseConnection, event: CatalogueEvent, id: string) {
-	return deletionResponse(async () => {
+	return lifecycleResponse(async () => {
 		assertSameOrigin(event.request, event.url);
 		const parsed = commandSchema.safeParse(await event.request.json());
 		if (!parsed.success)
@@ -131,15 +134,35 @@ export function listDelete(connection: DatabaseConnection, event: CatalogueEvent
 					.get();
 				if (receipt) {
 					if (receipt.fingerprint !== requestFingerprint)
-						throw new ListDeletionConflictError({
+						throw new ListLifecycleError({
 							reason: 'operation-reused',
+							administratorId: actor.userId,
+							listId: id,
+							operationId: input.operationId,
 							message: 'This operation ID was already used for a different request.'
 						});
 					return JSON.parse(receipt.resultJson) as ListDeletionAcknowledgement;
 				}
-				const { impact, orphanProductIds } = deletionImpact(connection, actor.userId, id);
+				let reviewed;
+				try {
+					reviewed = deletionImpact(connection, actor.userId, id);
+				} catch (error) {
+					if (error instanceof AccessError && error.status === 404)
+						throw new ListLifecycleError(
+							{
+								reason: 'list-unavailable',
+								administratorId: actor.userId,
+								listId: id,
+								operationId: input.operationId,
+								message: error.message
+							},
+							404
+						);
+					throw error;
+				}
+				const { impact, orphanProductIds } = reviewed;
 				if (input.impactFingerprint !== impact.fingerprint)
-					throw new ListDeletionConflictError({
+					throw new ListLifecycleError({
 						reason: 'refresh-impact',
 						message:
 							'This list has changed. Review the current ideas, reservations and purchases before deleting it.',
@@ -176,6 +199,47 @@ export function listDelete(connection: DatabaseConnection, event: CatalogueEvent
 					})
 					.run();
 				return acknowledgement;
+			})
+			.immediate();
+	});
+}
+
+export function listVisibilityPatch(
+	connection: DatabaseConnection,
+	event: CatalogueEvent,
+	id: string
+) {
+	return lifecycleResponse(async () => {
+		assertSameOrigin(event.request, event.url);
+		requireAdministrator(connection, event.locals.actor);
+		const parsed = z.object({ archived: z.boolean() }).safeParse(await event.request.json());
+		if (!parsed.success) throw new AccessError(400, 'Choose whether this list is archived.');
+		return connection.sqlite
+			.transaction(() => {
+				const actor = requireAdministrator(connection, event.locals.actor);
+				if (
+					!connection.db
+						.select()
+						.from(lists)
+						.where(and(eq(lists.id, id), isNull(lists.deletedAt)))
+						.get()
+				)
+					throw new ListLifecycleError(
+						{
+							reason: 'list-unavailable',
+							administratorId: actor.userId,
+							listId: id,
+							archived: parsed.data.archived,
+							message: 'List not found.'
+						},
+						404
+					);
+				connection.db
+					.update(lists)
+					.set({ archivedAt: parsed.data.archived ? Date.now() : null })
+					.where(eq(lists.id, id))
+					.run();
+				return { ok: true };
 			})
 			.immediate();
 	});

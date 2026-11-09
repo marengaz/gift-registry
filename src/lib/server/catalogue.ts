@@ -27,6 +27,7 @@ import {
 import { addProductToList } from './db/catalogue';
 import { apiResponse, assertSameOrigin } from './http';
 import { prepareMedia, type MediaOptions, type PreparedMedia } from './media';
+import { listVisibilityPatch } from './list-lifecycle';
 
 export type CatalogueEvent = { locals: { actor: Actor | null }; request: Request; url: URL };
 const text = z.string().trim().min(1);
@@ -384,31 +385,7 @@ export function listsPost(connection: DatabaseConnection, event: CatalogueEvent)
 	});
 }
 export function listPatch(connection: DatabaseConnection, event: CatalogueEvent, id: string) {
-	return apiResponse(async () => {
-		assertSameOrigin(event.request, event.url);
-		requireAdministrator(connection, event.locals.actor);
-		const parsed = z.object({ archived: z.boolean() }).safeParse(await event.request.json());
-		if (!parsed.success) throw new AccessError(400, 'Choose whether this list is archived.');
-		return connection.sqlite
-			.transaction(() => {
-				requireAdministrator(connection, event.locals.actor);
-				if (
-					!connection.db
-						.select()
-						.from(lists)
-						.where(and(eq(lists.id, id), isNull(lists.deletedAt)))
-						.get()
-				)
-					throw new AccessError(404, 'List not found.');
-				connection.db
-					.update(lists)
-					.set({ archivedAt: parsed.data.archived ? Date.now() : null })
-					.where(eq(lists.id, id))
-					.run();
-				return { ok: true };
-			})
-			.immediate();
-	});
+	return listVisibilityPatch(connection, event, id);
 }
 export function recipientsPost(connection: DatabaseConnection, event: CatalogueEvent) {
 	return apiResponse(async () => {

@@ -8,6 +8,7 @@ export const load: PageServerLoad = async (event) => {
 	const result = await pageResult(listsGet(connection, event, event.params.id));
 	return {
 		...result,
+		administratorId: result.administrator ? event.locals.actor?.userId : undefined,
 		totals: result.administrator
 			? calculateListTotals(connection, event.locals.actor, event.params.id)
 			: null

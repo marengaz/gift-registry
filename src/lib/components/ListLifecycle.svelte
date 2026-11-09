@@ -170,9 +170,7 @@
 					let value: unknown = null;
 					try {
 						value = await response.json();
-					} catch {
-						/* An unreadable reply cannot acknowledge a write. */
-					}
+					} catch {}
 					return { response, value };
 				})()
 			]);
@@ -221,7 +219,7 @@
 			if (response.status === 401 || response.status === 403) {
 				signInRequired = true;
 				message = 'Sign in again as the same administrator to review this list.';
-			} else if (response.ok && validImpact(value, current.listId)) impact = value;
+			} else if (response.ok && validImpact(value, current.listId)) reviewImpact(value);
 			else
 				message =
 					response.status === 404
@@ -240,6 +238,10 @@
 		impact = null;
 		target = { listId: list.id, listName: list.name, recipientName: list.recipientName };
 		void preview(target);
+	}
+	function reviewImpact(value: ListDeletionImpact) {
+		impact = value;
+		target = { listId: value.listId, listName: value.listName, recipientName: value.recipientName };
 	}
 	function hide(list: GiftList, source: HTMLElement) {
 		if (disabled) return;
@@ -308,20 +310,39 @@
 				throw new Error(
 					'The server returned an unreadable confirmation. Retry the same request to check its result.'
 				);
-			const failure = value as { reason?: string; message?: string; impact?: unknown };
+			const failure = value as {
+				reason?: string;
+				message?: string;
+				impact?: unknown;
+				administratorId?: string;
+				listId?: string;
+				operationId?: string;
+				archived?: boolean;
+			};
 			if (!response.ok) {
 				if (
+					current.kind === 'delete' &&
 					response.status === 409 &&
 					failure.reason === 'refresh-impact' &&
 					validImpact(failure.impact, current.listId)
 				) {
 					clearPending();
-					impact = failure.impact;
+					reviewImpact(failure.impact);
 					message =
 						'This list changed. Review the updated counts, then confirm again if you still want to delete it.';
 					return;
 				}
-				if (response.status < 500) {
+				if (
+					failure.administratorId === administratorId &&
+					failure.listId === current.listId &&
+					(current.kind === 'delete'
+						? failure.operationId === JSON.parse(current.body).operationId &&
+							((response.status === 404 && failure.reason === 'list-unavailable') ||
+								(response.status === 409 && failure.reason === 'operation-reused'))
+						: response.status === 404 &&
+							failure.reason === 'list-unavailable' &&
+							failure.archived === JSON.parse(current.body).archived)
+				) {
 					clearPending();
 					impact = null;
 					message =
@@ -389,6 +410,11 @@
 </script>
 
 <div class="list-lifecycle-status" tabindex="-1" bind:this={statusRegion}>
+	{#if pending?.kind === 'visibility'}<p>
+			Unconfirmed request: {JSON.parse(pending.body).archived ? 'Hide' : 'Show'}
+			{pending.listName}
+			for {pending.recipientName}.
+		</p>{/if}
 	{#if message}<p role={pending ? 'alert' : 'status'}>{message}</p>{/if}
 	{#if signInRequired && !target}<a href="/login">Sign in again</a>{/if}
 	{#if pending && !target}<button disabled={!online || busy} onclick={() => send()}
@@ -410,7 +436,8 @@
 	{#if previewBusy}<p role="status">Loading the current list details…</p>{/if}
 	{#if impact}
 		<p>
-			{impact.productCount} {impact.productCount === 1 ? 'idea is' : 'ideas are'} on this list.
+			{impact.productCount}
+			{impact.productCount === 1 ? 'idea is' : 'ideas are'} on this list.
 		</p>
 		<p>
 			{impact.allocatedCount} reserved or assigned {impact.allocatedCount === 1 ? 'gift' : 'gifts'} and

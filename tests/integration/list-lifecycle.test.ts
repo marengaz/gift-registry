@@ -201,7 +201,12 @@ describe('administrator list deletion HTTP and SQLite contract', () => {
 		] as const) {
 			const response = await remove(changed, id);
 			expect(response.status).toBe(409);
-			expect(await response.json()).toMatchObject({ reason: 'operation-reused' });
+			expect(await response.json()).toMatchObject({
+				reason: 'operation-reused',
+				administratorId: 'admin',
+				listId: id,
+				operationId: changed.operationId
+			});
 		}
 		expect(snapshot()).toEqual(before);
 	});
@@ -307,7 +312,15 @@ describe('administrator list deletion HTTP and SQLite contract', () => {
 				deletedProductCount: 0
 			});
 			const before = snapshot();
-			expect((await remove({ ...input, operationId: randomUUID() }, id)).status).toBe(404);
+			const freshOperationId = randomUUID();
+			const unavailable = await remove({ ...input, operationId: freshOperationId }, id);
+			expect(unavailable.status).toBe(404);
+			expect(await unavailable.json()).toMatchObject({
+				reason: 'list-unavailable',
+				administratorId: 'admin',
+				listId: id,
+				operationId: freshOperationId
+			});
 			expect((await listDeletionImpactGet(context.connection, event(), id)).status).toBe(404);
 			expect(snapshot()).toEqual(before);
 		}

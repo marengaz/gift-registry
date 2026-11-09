@@ -250,9 +250,18 @@ describe('deleted list boundaries with retained memberships', () => {
 	});
 	it('cannot restore a deleted list and permits a fresh replacement without inheriting old grants', async () => {
 		removeList();
-		expect(
-			(await listPatch(model.connection, event('admin', { archived: false }), 'visible')).status
-		).toBe(404);
+		const unavailable = await listPatch(
+			model.connection,
+			event('admin', { archived: false }),
+			'visible'
+		);
+		expect(unavailable.status).toBe(404);
+		expect(await unavailable.json()).toMatchObject({
+			reason: 'list-unavailable',
+			administratorId: 'admin',
+			listId: 'visible',
+			archived: false
+		});
 		const replacement = await listsPost(
 			model.connection,
 			event('admin', { recipientId: 'child', name: 'New birthday', occasion: 'Birthday' })

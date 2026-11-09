@@ -26,8 +26,20 @@ export type ListDeletionAcknowledgement = {
 	keptProductCount: number;
 };
 
-export type ListDeletionConflictReason = 'operation-reused' | 'refresh-impact';
-
-export type ListDeletionConflict =
-	| { message: string; reason: 'operation-reused' }
+export type ListDeletionFailure =
+	| {
+			message: string;
+			reason: 'operation-reused' | 'list-unavailable';
+			administratorId: string;
+			listId: string;
+			operationId: string;
+	  }
 	| { message: string; reason: 'refresh-impact'; impact: ListDeletionImpact };
+
+export type ListVisibilityFailure = {
+	message: string;
+	reason: 'list-unavailable';
+	administratorId: string;
+	listId: string;
+	archived: boolean;
+};

@@ -559,3 +559,194 @@ test('relative cards retain ordinary navigation and expose no administrative lis
 	await open.click();
 	await expect(page).toHaveURL(origin + '/lists/visible');
 });
+
+test('detail-page visibility retries remain attached to the original list after membership navigation', async ({
+	page,
+	context
+}) => {
+	seed('detail-navigation', true);
+	await signIn(context);
+	await page.goto(origin + '/lists/detail-navigation');
+	const sent: { url: string; body: string }[] = [];
+	await page.route('**/api/lists/*', async (route) => {
+		if (route.request().method() !== 'PATCH') return route.continue();
+		sent.push({ url: route.request().url(), body: route.request().postData()! });
+		if (sent.length === 1) return route.abort('failed');
+		await route.continue();
+	});
+	await page.getByRole('button', { name: 'Hide list', exact: true }).click();
+	await expect(page.getByRole('button', { name: /Retry/ })).toBeEnabled();
+	await page
+		.getByRole('link', { name: 'Recipient detail-navigation · shared', exact: true })
+		.click();
+	await expect(page).toHaveURL(origin + '/lists/detail-navigation-shared');
+	await expect(page.locator('.list-lifecycle-status')).toContainText(
+		'Unconfirmed request: Hide Ideas detail-navigation for Recipient detail-navigation.'
+	);
+	await page.getByRole('button', { name: /Retry/ }).click();
+	await expect.poll(() => sent.length).toBe(2);
+	expect(sent[1]).toEqual(sent[0]);
+	expect(
+		database((db) =>
+			db.prepare('SELECT archived_at FROM lists WHERE id=?').get('detail-navigation-shared')
+		)
+	).toEqual({ archived_at: null });
+	await expect(page.getByRole('button', { name: 'Hide list', exact: true })).toBeEnabled();
+});
+
+test('detail-page visibility recovers its saved absolute change after reload and return to all lists', async ({
+	page,
+	context
+}) => {
+	seed('detail-reload');
+	await signIn(context);
+	await page.goto(origin + '/lists/detail-reload');
+	const bodies: string[] = [];
+	await page.route('**/api/lists/detail-reload', async (route) => {
+		if (route.request().method() !== 'PATCH') return route.continue();
+		bodies.push(route.request().postData()!);
+		if (bodies.length === 1) {
+			expect((await route.fetch()).ok()).toBe(true);
+			return route.fulfill({ status: 408, json: { message: 'Intermediary timeout' } });
+		}
+		await route.continue();
+	});
+	await page.getByRole('button', { name: 'Hide list', exact: true }).click();
+	await expect(page.getByRole('button', { name: /Retry/ })).toBeEnabled();
+	await page.reload();
+	await expect(page.getByRole('button', { name: /Retry/ })).toBeEnabled();
+	await expect(page.getByRole('button', { name: 'Show list', exact: true })).toBeDisabled();
+	await page.getByRole('link', { name: '← All lists', exact: true }).click();
+	await page.getByRole('button', { name: 'Retry last request', exact: true }).click();
+	await expect(page.getByRole('button', { name: 'Retry last request', exact: true })).toHaveCount(
+		0
+	);
+	expect(bodies).toEqual([JSON.stringify({ archived: true }), JSON.stringify({ archived: true })]);
+	expect(
+		(await (await context.request.get(origin + '/api/lists/detail-reload')).json()).list.archivedAt
+	).not.toBeNull();
+});
+
+test('unrecognised JSON client errors retain committed deletions for identical receipt recovery', async ({
+	page,
+	context
+}) => {
+	await signIn(context);
+	for (const [index, status] of [408, 404, 429, 409, 404].entries()) {
+		const id = `json-${status}-${index}`;
+		seed(id);
+		await page.goto(origin + '/lists');
+		const bodies: string[] = [];
+		await page.route(`**/api/lists/${id}`, async (route) => {
+			if (route.request().method() !== 'DELETE') return route.continue();
+			bodies.push(route.request().postData()!);
+			if (bodies.length === 1) {
+				expect((await route.fetch()).ok()).toBe(true);
+				return route.fulfill({
+					status,
+					json:
+						index === 4
+							? {
+									reason: 'list-unavailable',
+									administratorId: 'admin',
+									listId: id,
+									operationId: crypto.randomUUID()
+								}
+							: status === 409
+								? { reason: 'refresh-impact', impact: {} }
+								: { message: 'Intermediary error' }
+				});
+			}
+			await route.continue();
+		});
+		let dialog = await openDelete(page, id);
+		await dialog.getByRole('button', { name: 'Delete list', exact: true }).click();
+		await expect(
+			dialog.getByRole('button', { name: 'Retry last request', exact: true })
+		).toBeEnabled();
+		await page.reload();
+		dialog = page.getByRole('dialog', {
+			name: `Delete Ideas ${id} for Recipient ${id}?`,
+			exact: true
+		});
+		await dialog.getByRole('button', { name: 'Retry last request', exact: true }).click();
+		await expect(dialog).toBeHidden();
+		expect(bodies).toHaveLength(2);
+		expect(bodies[1]).toBe(bodies[0]);
+		expect(
+			database((db) =>
+				db.prepare('SELECT COUNT(*) AS count FROM list_deletion_receipts WHERE list_id=?').get(id)
+			)
+		).toEqual({ count: 1 });
+	}
+});
+
+test('deletion confirmation names follow the validated preview and changed-impact response', async ({
+	page,
+	context
+}) => {
+	seed('renamed');
+	await signIn(context);
+	await page.goto(origin + '/lists');
+	const rename = (suffix: string) =>
+		database((db) => {
+			db.prepare('UPDATE lists SET name=? WHERE id=?').run(`Ideas ${suffix}`, 'renamed');
+			db.prepare('UPDATE recipients SET name=? WHERE id=?').run(`Recipient ${suffix}`, 'renamed');
+		});
+	rename('current');
+	await page
+		.getByRole('button', { name: 'Delete Ideas renamed for Recipient renamed', exact: true })
+		.click();
+	let dialog = page.getByRole('dialog', {
+		name: 'Delete Ideas current for Recipient current?',
+		exact: true
+	});
+	await expect(dialog.getByRole('button', { name: 'Delete list', exact: true })).toBeEnabled();
+	rename('reviewed');
+	await dialog.getByRole('button', { name: 'Delete list', exact: true }).click();
+	dialog = page.getByRole('dialog', {
+		name: 'Delete Ideas reviewed for Recipient reviewed?',
+		exact: true
+	});
+	await expect(dialog).toContainText('This list changed');
+	expect((await context.request.get(origin + '/api/lists/renamed')).ok()).toBe(true);
+	await dialog.getByRole('button', { name: 'Delete list', exact: true }).click();
+	await expect(dialog).toBeHidden();
+	await expect(page.locator('.list-lifecycle-status')).toContainText(
+		'Ideas reviewed for Recipient reviewed deleted'
+	);
+});
+
+test('a recognised non-commit reply releases a deletion superseded by another operation', async ({
+	page,
+	context
+}) => {
+	seed('superseded');
+	await signIn(context);
+	await page.goto(origin + '/lists');
+	const dialog = await openDelete(page, 'superseded');
+	const impact = await (
+		await context.request.get(origin + '/api/lists/superseded/deletion-impact')
+	).json();
+	expect(
+		(
+			await context.request.delete(origin + '/api/lists/superseded', {
+				headers: { origin },
+				data: {
+					operationId: crypto.randomUUID(),
+					deleteOrphans: false,
+					impactFingerprint: impact.fingerprint
+				}
+			})
+		).ok()
+	).toBe(true);
+	await dialog.getByRole('button', { name: 'Delete list', exact: true }).click();
+	await expect(dialog).toContainText('This list is no longer available');
+	await expect(dialog.getByRole('button', { name: 'Cancel', exact: true })).toBeEnabled();
+	await expect(dialog.getByRole('button', { name: 'Retry last request', exact: true })).toHaveCount(
+		0
+	);
+	await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+	await page.reload();
+	await expect(page.getByRole('dialog')).toHaveCount(0);
+});
