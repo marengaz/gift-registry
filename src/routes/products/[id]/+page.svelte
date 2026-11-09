@@ -112,7 +112,7 @@
 							(item: { id: string }) => item.id === entry.listId
 						)}{#if list}<p>
 								<a href={`/lists/${list.id}`}>{list.recipientName} · {list.name}</a><br /><small
-									>{list.occasion ?? 'General ideas'}{list.archivedAt ? ' · Archived' : ''} · {money(
+									>{list.occasion ?? 'General ideas'}{list.archivedAt ? ' · Hidden' : ''} · {money(
 										entry.estimatePence
 									)}</small
 								>

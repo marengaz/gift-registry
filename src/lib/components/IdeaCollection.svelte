@@ -130,7 +130,7 @@
 						{#each selectableLists as list}<option value={list.id}
 								>{list.recipientName} · {list.name}{list.occasion && list.occasion !== list.name
 									? ` (${list.occasion})`
-									: ''}{list.archivedAt ? ' (archived)' : ''}</option
+									: ''}{list.archivedAt ? ' (hidden)' : ''}</option
 							>{/each}
 					</select></label
 				>{/if}
