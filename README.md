@@ -12,6 +12,10 @@ The administrator can also delete ideas individually or in bulk. Deletion hides 
 
 Catalogue actions need an online acknowledgement. If the response is lost, use the displayed retry to check the same action before starting another.
 
+On **Gift lists**, the administrator can **Hide list**, then use **Show hidden lists** to find it and show it again. Relatives cannot access a hidden list; its ideas and buying history are retained.
+
+**Delete list** asks for confirmation and keeps ideas by default. Optional cleanup deletes only ideas from that list which have no other undeleted list. Hidden lists still protect their ideas, and previously unlisted ideas are untouched. List deletion has no in-app Undo; retained history and photographs remain in backups. A recreated list needs fresh sharing permissions.
+
 ## Run locally
 
 Use Node 26.13.0 or a later Node 26 release. Install the locked dependencies, then create your local settings:
