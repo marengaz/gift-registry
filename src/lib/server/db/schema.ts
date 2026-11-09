@@ -28,15 +28,16 @@ export const lists = sqliteTable(
 		name: text('name').notNull(),
 		occasion: text('occasion'),
 		archivedAt: integer('archived_at'),
+		deletedAt: integer('deleted_at'),
 		createdAt: createdAt()
 	},
 	(table) => [
 		uniqueIndex('lists_recipient_occasion_unique')
 			.on(table.recipientId, table.occasion)
-			.where(sql`${table.occasion} IS NOT NULL`),
+			.where(sql`${table.occasion} IS NOT NULL AND ${table.deletedAt} IS NULL`),
 		uniqueIndex('lists_recipient_general_unique')
 			.on(table.recipientId)
-			.where(sql`${table.occasion} IS NULL`),
+			.where(sql`${table.occasion} IS NULL AND ${table.deletedAt} IS NULL`),
 		check(
 			'lists_occasion_not_empty',
 			sql`${table.occasion} IS NULL OR length(trim(${table.occasion})) > 0`
@@ -210,6 +211,21 @@ export const captureReceipts = sqliteTable(
 		productId: text('product_id')
 			.notNull()
 			.references(() => products.id, { onDelete: 'restrict' }),
+		resultJson: text('result_json').notNull(),
+		createdAt: createdAt()
+	},
+	(table) => [primaryKey({ columns: [table.actorId, table.operationId] })]
+);
+
+export const listDeletionReceipts = sqliteTable(
+	'list_deletion_receipts',
+	{
+		actorId: text('actor_id').notNull(),
+		operationId: text('operation_id').notNull(),
+		listId: text('list_id')
+			.notNull()
+			.references(() => lists.id, { onDelete: 'restrict' }),
+		fingerprint: text('fingerprint').notNull(),
 		resultJson: text('result_json').notNull(),
 		createdAt: createdAt()
 	},

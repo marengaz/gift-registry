@@ -159,7 +159,12 @@ export function visibleLists(connection: DatabaseConnection, actor: Actor) {
 		.all()
 		.filter(({ list }) => fresh.administrator || listRole(connection, fresh, list.id) !== null)
 		.map(({ list, recipient }) => ({
-			...list,
+			id: list.id,
+			recipientId: list.recipientId,
+			name: list.name,
+			occasion: list.occasion,
+			archivedAt: list.archivedAt,
+			createdAt: list.createdAt,
 			recipientName: recipient.name,
 			role: fresh.administrator ? ('administrator' as const) : listRole(connection, fresh, list.id)
 		}));
