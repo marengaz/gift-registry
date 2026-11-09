@@ -19,7 +19,7 @@ function validateGrants(connection: DatabaseConnection, grants: ListGrant[]) {
 			!['contributor', 'buyer', 'viewer'].includes(grant.role) ||
 			seen.has(grant.listId) ||
 			!connection.sqlite
-				.prepare('SELECT 1 FROM lists WHERE id=? AND archived_at IS NULL')
+				.prepare('SELECT 1 FROM lists WHERE id=? AND archived_at IS NULL AND deleted_at IS NULL')
 				.get(grant.listId)
 		)
 			throw new AccessError(400, 'Choose each active list once with a valid role.');
@@ -134,7 +134,9 @@ export function peopleSettings(connection: DatabaseConnection, actor: Actor) {
 			)
 			.all() as { id: string; name: string; email: string }[],
 		grants: connection.sqlite
-			.prepare('SELECT user_id AS userId,list_id AS listId,role FROM grants')
+			.prepare(
+				'SELECT g.user_id AS userId,g.list_id AS listId,g.role FROM grants g JOIN lists l ON l.id=g.list_id WHERE l.deleted_at IS NULL'
+			)
 			.all() as { userId: string; listId: string; role: ListRole }[],
 		invitations: connection.sqlite
 			.prepare(

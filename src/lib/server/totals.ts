@@ -16,7 +16,13 @@ export function calculateListTotals(
 	listId: string
 ): ListTotals {
 	requireAdministrator(connection, actor);
-	if (!connection.db.select().from(lists).where(eq(lists.id, listId)).get())
+	if (
+		!connection.db
+			.select()
+			.from(lists)
+			.where(and(eq(lists.id, listId), isNull(lists.deletedAt)))
+			.get()
+	)
 		throw new AccessError(404, 'List not found.');
 	const totals: ListTotals = {
 		all: { pence: 0, unknown: 0, count: 0 },

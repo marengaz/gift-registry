@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { eq, isNull } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import {
 	AccessError,
@@ -115,7 +115,7 @@ function checkTargets(
 	for (const id of new Set(listIds)) {
 		requireListRole(connection, actor, id, ['contributor']);
 		const list = connection.db.select().from(lists).where(eq(lists.id, id)).get();
-		if (!list || (list.archivedAt !== null && !existingIds.includes(id)))
+		if (!list || list.deletedAt !== null || (list.archivedAt !== null && !existingIds.includes(id)))
 			throw new AccessError(403, 'Choose an active list you can contribute to.');
 	}
 }
@@ -209,7 +209,9 @@ export function productsGet(connection: DatabaseConnection, event: CatalogueEven
 			.reverse()
 			.filter((product) => {
 				const empty = !connection.sqlite
-					.prepare('SELECT 1 FROM entries WHERE product_id=?')
+					.prepare(
+						'SELECT 1 FROM entries e JOIN lists l ON l.id=e.list_id WHERE e.product_id=? AND l.deleted_at IS NULL'
+					)
 					.get(product.id);
 				return (
 					(!inbox || (empty && (actor.administrator || product.contributorId === actor.userId))) &&
@@ -272,10 +274,12 @@ export function productPatch(connection: DatabaseConnection, event: CatalogueEve
 			.transaction(() => {
 				projection(connection, actor, id);
 				const existing = connection.db
-					.select()
+					.select({ entry: entries })
 					.from(entries)
-					.where(eq(entries.productId, id))
-					.all();
+					.innerJoin(lists, eq(entries.listId, lists.id))
+					.where(and(eq(entries.productId, id), isNull(lists.deletedAt)))
+					.all()
+					.map(({ entry }) => entry);
 				checkTargets(
 					connection,
 					actor,
@@ -334,6 +338,7 @@ export function listsGet(connection: DatabaseConnection, event: CatalogueEvent, 
 			return {
 				lists: available,
 				administrator: actor.administrator,
+				...(actor.administrator ? { administratorId: actor.userId } : {}),
 				canCapture: canCapture(connection, actor),
 				recipients: actor.administrator ? connection.db.select().from(recipients).all() : []
 			};
@@ -366,7 +371,7 @@ export function listsPost(connection: DatabaseConnection, event: CatalogueEvent)
 		)
 			throw new AccessError(400, 'Choose an existing recipient.');
 		const duplicate = connection.sqlite
-			.prepare('SELECT 1 FROM lists WHERE recipient_id=? AND occasion IS ?')
+			.prepare('SELECT 1 FROM lists WHERE recipient_id=? AND occasion IS ? AND deleted_at IS NULL')
 			.get(parsed.data.recipientId, parsed.data.occasion);
 		if (duplicate)
 			throw new AccessError(
@@ -384,14 +389,25 @@ export function listPatch(connection: DatabaseConnection, event: CatalogueEvent,
 		requireAdministrator(connection, event.locals.actor);
 		const parsed = z.object({ archived: z.boolean() }).safeParse(await event.request.json());
 		if (!parsed.success) throw new AccessError(400, 'Choose whether this list is archived.');
-		if (!connection.db.select().from(lists).where(eq(lists.id, id)).get())
-			throw new AccessError(404, 'List not found.');
-		connection.db
-			.update(lists)
-			.set({ archivedAt: parsed.data.archived ? Date.now() : null })
-			.where(eq(lists.id, id))
-			.run();
-		return { ok: true };
+		return connection.sqlite
+			.transaction(() => {
+				requireAdministrator(connection, event.locals.actor);
+				if (
+					!connection.db
+						.select()
+						.from(lists)
+						.where(and(eq(lists.id, id), isNull(lists.deletedAt)))
+						.get()
+				)
+					throw new AccessError(404, 'List not found.');
+				connection.db
+					.update(lists)
+					.set({ archivedAt: parsed.data.archived ? Date.now() : null })
+					.where(eq(lists.id, id))
+					.run();
+				return { ok: true };
+			})
+			.immediate();
 	});
 }
 export function recipientsPost(connection: DatabaseConnection, event: CatalogueEvent) {

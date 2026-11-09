@@ -117,7 +117,8 @@ export function listRole(
 ): ListRole | null {
 	const fresh = requireMember(connection, actor);
 	const list = connection.db.select().from(lists).where(eq(lists.id, listId)).get();
-	if (!list || (!fresh.administrator && list.archivedAt !== null)) return null;
+	if (!list || list.deletedAt !== null || (!fresh.administrator && list.archivedAt !== null))
+		return null;
 	if (fresh.administrator) return 'contributor';
 	return (
 		(
@@ -145,7 +146,7 @@ export function canCapture(connection: DatabaseConnection, actor: Actor): boolea
 		fresh.administrator ||
 		!!connection.sqlite
 			.prepare(
-				`SELECT 1 FROM grants g JOIN lists l ON l.id=g.list_id WHERE g.user_id=? AND g.role='contributor' AND l.archived_at IS NULL LIMIT 1`
+				`SELECT 1 FROM grants g JOIN lists l ON l.id=g.list_id WHERE g.user_id=? AND g.role='contributor' AND l.archived_at IS NULL AND l.deleted_at IS NULL LIMIT 1`
 			)
 			.get(fresh.userId)
 	);
@@ -156,6 +157,7 @@ export function visibleLists(connection: DatabaseConnection, actor: Actor) {
 		.select({ list: lists, recipient: recipients })
 		.from(lists)
 		.innerJoin(recipients, eq(lists.recipientId, recipients.id))
+		.where(isNull(lists.deletedAt))
 		.all()
 		.filter(({ list }) => fresh.administrator || listRole(connection, fresh, list.id) !== null)
 		.map(({ list, recipient }) => ({
@@ -179,9 +181,11 @@ export function visibleEntries(
 		.select({ entry: entries })
 		.from(entries)
 		.innerJoin(products, eq(entries.productId, products.id))
+		.innerJoin(lists, eq(entries.listId, lists.id))
 		.where(
 			and(
 				isNull(products.deletedAt),
+				isNull(lists.deletedAt),
 				filter.listId ? eq(entries.listId, filter.listId) : undefined,
 				filter.productId ? eq(entries.productId, filter.productId) : undefined
 			)
@@ -205,10 +209,12 @@ export function canReadProduct(
 	if (!product || product.deletedAt !== null) return false;
 	if (fresh.administrator) return true;
 	const memberships = connection.db
-		.select()
+		.select({ entry: entries })
 		.from(entries)
-		.where(eq(entries.productId, productId))
-		.all();
+		.innerJoin(lists, eq(entries.listId, lists.id))
+		.where(and(eq(entries.productId, productId), isNull(lists.deletedAt)))
+		.all()
+		.map(({ entry }) => entry);
 	if (memberships.length === 0) return product.contributorId === fresh.userId;
 	return memberships.some(
 		(entry) =>
@@ -253,7 +259,9 @@ export function projectProduct(connection: DatabaseConnection, actor: Actor, pro
 export function eligibleListMembers(connection: DatabaseConnection, actor: Actor, listId: string) {
 	const administrator = requireAdministrator(connection, actor);
 	if (
-		!connection.sqlite.prepare('SELECT 1 FROM lists WHERE id=? AND archived_at IS NULL').get(listId)
+		!connection.sqlite
+			.prepare('SELECT 1 FROM lists WHERE id=? AND archived_at IS NULL AND deleted_at IS NULL')
+			.get(listId)
 	)
 		return [];
 	const members = connection.sqlite

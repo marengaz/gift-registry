@@ -35,6 +35,9 @@ function authorisedEntry(
 	if (
 		!entry ||
 		!connection.sqlite
+			.prepare('SELECT 1 FROM lists WHERE id=? AND deleted_at IS NULL')
+			.get(entry.listId) ||
+		!connection.sqlite
 			.prepare('SELECT 1 FROM products WHERE id=? AND deleted_at IS NULL')
 			.get(entry.productId)
 	)

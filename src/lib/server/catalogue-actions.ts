@@ -180,7 +180,7 @@ function productEntries(connection: DatabaseConnection, productId: string) {
 function initialEstimate(connection: DatabaseConnection, productId: string): number | null {
 	const existing = connection.sqlite
 		.prepare(
-			'SELECT e.estimate_pence AS estimate FROM entries e JOIN lists l ON l.id=e.list_id WHERE e.product_id=? AND l.archived_at IS NULL'
+			'SELECT e.estimate_pence AS estimate FROM entries e JOIN lists l ON l.id=e.list_id WHERE e.product_id=? AND l.archived_at IS NULL AND l.deleted_at IS NULL'
 		)
 		.all(productId) as { estimate: number | null }[];
 	if (existing.length)
@@ -200,7 +200,9 @@ function addToLists(
 	connection: DatabaseConnection,
 	input: Extract<CatalogueActionRequest, { kind: 'add' }>
 ): Snapshots {
-	const list = connection.sqlite.prepare('SELECT id FROM lists WHERE id=? AND archived_at IS NULL');
+	const list = connection.sqlite.prepare(
+		'SELECT id FROM lists WHERE id=? AND archived_at IS NULL AND deleted_at IS NULL'
+	);
 	for (const id of input.listIds)
 		if (!list.get(id))
 			throw new CatalogueConflict(
@@ -359,6 +361,9 @@ function reverseAction(connection: DatabaseConnection, receipt: Receipt, snapsho
 			if (
 				!product ||
 				product.deletedAt !== null ||
+				!connection.sqlite
+					.prepare('SELECT 1 FROM lists WHERE id=? AND deleted_at IS NULL')
+					.get(saved.listId) ||
 				current?.state !== 'available' ||
 				!isDeepStrictEqual(current, saved) ||
 				history.get(saved.id)
