@@ -6,6 +6,12 @@ The app is an installable website. Android Chrome can share links and photos int
 
 The existing retailer reader runs first, including Amazon-specific handling. Optional Gemini help fills missing details from readable pages, selected screenshots and pasted text. For blocked shops, add a screenshot to the same idea. See [Save ideas from shops](docs/retailer-imports.md) for the workflow and prior live retailer checks.
 
+In the catalogue, use **Add to lists** on an idea or select several ideas and add them together. Search the destination picker by recipient, list name or occasion; selected lists remain chosen while you search. Existing list memberships and buying details are preserved. Changing filters clears the idea selection; changing between cards and compact rows keeps it.
+
+The administrator can also delete ideas individually or in bulk. Deletion hides an idea throughout the app while retaining its photographs and buying history. Gifts already reserved, assigned or purchased require confirmation. **Undo last action** reverses the latest catalogue addition or deletion and survives a reload. It has one level: a newer effective action replaces the previous Undo target. Later reservations, purchases or edits can prevent Undo from reversing an action safely.
+
+Catalogue actions need an online acknowledgement. If the response is lost, use the displayed retry to check the same action before starting another.
+
 ## Run locally
 
 Use Node 26.13.0 or a later Node 26 release. Install the locked dependencies, then create your local settings:

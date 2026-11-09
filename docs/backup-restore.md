@@ -56,6 +56,8 @@ The helper verifies file hashes, database integrity, foreign keys and all refere
 - marks formerly queued/running lookups cancelled, or uncertain if they might have been paid;
 - removes restored sessions, OAuth verification state and unused invitation tokens.
 
+Catalogue deletion markers, action receipts and the latest Undo target are included in the snapshot. Photographs belonging to deleted ideas remain referenced and are backed up too. After signing in again as the same administrator, a restored latest action can still be undone, provided its recorded effects have not changed. Restoring a backup does not uncover older Undo actions or provide a separate deleted-ideas browser.
+
 Existing family membership/grants are retained as snapshot data. Review them before making the recovered service public: revocations performed after the snapshot are not present in an older database. Everyone must sign in again, and pending invitations must be recreated.
 
 An older snapshot cannot know provider charges incurred after it was taken. Keep paid identification disabled until you reconcile those current-month charges against the dedicated project's usage, or wait for a new UTC month before re-enabling it. Restoring does not release any recorded reservation and does not redispatch old lookups.

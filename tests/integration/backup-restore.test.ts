@@ -3,9 +3,23 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import Database from 'better-sqlite3';
+import { randomUUID } from 'node:crypto';
 import { fixture } from './identity-fixture';
 import { acceptInvitation, createInvitation } from '../../src/lib/server/invitations';
 import { createBackup, restoreBackup } from '../../scripts/backup.mjs';
+import { createDatabase } from '../../src/lib/server/db/client';
+import { canReadProduct, requireMediaAccess, resolveActor } from '../../src/lib/server/access';
+import { allocationPost } from '../../src/lib/server/allocations';
+import {
+	catalogueActionsPost,
+	catalogueActionsUndoPost
+} from '../../src/lib/server/catalogue-actions';
+import { calculateListTotals } from '../../src/lib/server/totals';
+import type {
+	CatalogueActionError,
+	CatalogueActionResult
+} from '../../src/lib/shared/catalogue-actions';
+import type { CatalogueEvent } from '../../src/lib/server/catalogue';
 const io = vi.hoisted(() => ({ pause: undefined as (() => Promise<void>) | undefined }));
 vi.mock('node:fs/promises', async (original) => {
 	const actual = await original<typeof import('node:fs/promises')>();
@@ -58,6 +72,124 @@ async function household() {
 	return { root, databasePath, mediaPath, destination: join(root, 'backup') };
 }
 describe('consistent household recovery', () => {
+	it('retains deleted ideas, their history and durable Undo through an isolated restore and fresh sign-in', async () => {
+		const source = await household();
+		const connection = createDatabase({ filename: source.databasePath });
+		let deleted: CatalogueActionResult;
+		let receipt: unknown;
+		let originalEntries: unknown;
+		let originalHistory: unknown;
+		const event = (actor: CatalogueEvent['locals']['actor'], body: unknown): CatalogueEvent => {
+			const url = new URL('http://localhost:4173/api/catalogue-actions');
+			return {
+				url,
+				locals: { actor },
+				request: new Request(url, {
+					method: 'POST',
+					headers: { origin: url.origin, 'content-type': 'application/json' },
+					body: JSON.stringify(body)
+				})
+			};
+		};
+		try {
+			const actor = resolveActor(connection, 'session-admin')!;
+			for (const [action, expectedVersion] of [
+				['undo', 0],
+				['purchase', 1]
+			] as const) {
+				const response = await allocationPost(
+					connection,
+					event(actor, {
+						actionId: randomUUID(),
+						action,
+						expectedVersion,
+						...(action === 'purchase' ? { actualPence: 2500 } : {})
+					}),
+					'entry'
+				);
+				expect(response.status).toBe(200);
+			}
+			originalEntries = connection.sqlite.prepare('SELECT * FROM entries').all();
+			originalHistory = connection.sqlite
+				.prepare('SELECT * FROM allocation_history ORDER BY id')
+				.all();
+			const command = { operationId: randomUUID(), kind: 'delete', productIds: ['gift'] };
+			const review = await catalogueActionsPost(connection, event(actor, command));
+			expect(review.status).toBe(409);
+			const impact = ((await review.json()) as CatalogueActionError).impact!;
+			const response = await catalogueActionsPost(
+				connection,
+				event(actor, { ...command, impactFingerprint: impact.fingerprint })
+			);
+			expect(response.status).toBe(200);
+			deleted = (await response.json()) as CatalogueActionResult;
+			receipt = connection.sqlite.prepare('SELECT * FROM catalogue_actions').all();
+		} finally {
+			connection.close();
+		}
+		await createBackup(source);
+		const destination = join(source.root, 'restored-with-undo');
+		await restoreBackup({ source: source.destination, destination });
+		const restored = createDatabase({ filename: join(destination, 'gifts.sqlite') });
+		try {
+			expect(restored.sqlite.prepare('SELECT COUNT(*) AS count FROM session').get()).toEqual({
+				count: 0
+			});
+			const now = Date.now();
+			restored.sqlite
+				.prepare(
+					'INSERT INTO session(id,user_id,token,expires_at,created_at,updated_at) VALUES (?,?,?,?,?,?)'
+				)
+				.run('fresh-admin', 'admin', 'fresh-token', now + 3600000, now, now);
+			const actor = resolveActor(restored, 'fresh-admin', {
+				administratorEmail: 'admin@example.test'
+			})!;
+			expect(actor.administrator).toBe(true);
+			expect(canReadProduct(restored, actor, 'gift')).toBe(false);
+			expect(() => requireMediaAccess(restored, actor, 'photo')).toThrow('Image not found.');
+			expect(calculateListTotals(restored, actor, 'visible').all.count).toBe(0);
+			expect(restored.sqlite.prepare('SELECT * FROM catalogue_actions').all()).toEqual(receipt);
+			expect(
+				restored.sqlite.prepare('SELECT action_id FROM catalogue_latest_actions').get()
+			).toEqual({ action_id: deleted.undo!.actionId });
+			expect(restored.sqlite.prepare('SELECT * FROM entries').all()).toEqual(originalEntries);
+			expect(restored.sqlite.prepare('SELECT * FROM allocation_history ORDER BY id').all()).toEqual(
+				originalHistory
+			);
+			expect(await readFile(join(destination, 'media/photo/original'), 'utf8')).toBe('original');
+			expect(await readFile(join(destination, 'media/photo/preview.webp'), 'utf8')).toBe('preview');
+			const undone = await catalogueActionsUndoPost(
+				restored,
+				event(actor, { operationId: randomUUID(), expectedActionId: deleted.undo!.actionId })
+			);
+			expect(undone.status).toBe(200);
+			expect(((await undone.json()) as CatalogueActionResult).undo).toBeNull();
+			expect(canReadProduct(restored, actor, 'gift')).toBe(true);
+			expect(requireMediaAccess(restored, actor, 'photo').productId).toBe('gift');
+			expect(calculateListTotals(restored, actor, 'visible').purchased).toMatchObject({
+				count: 1,
+				pence: 2500
+			});
+			expect(restored.sqlite.prepare('SELECT * FROM entries').all()).toEqual(originalEntries);
+			expect(restored.sqlite.prepare('SELECT * FROM allocation_history ORDER BY id').all()).toEqual(
+				originalHistory
+			);
+		} finally {
+			restored.close();
+		}
+		const live = new Database(source.databasePath, { readonly: true });
+		try {
+			expect(live.prepare('SELECT deletion_token FROM products').get()).toEqual({
+				deletion_token: deleted.undo!.actionId
+			});
+			expect(live.prepare('SELECT COUNT(*) AS count FROM catalogue_actions').get()).toEqual({
+				count: 1
+			});
+			expect(live.prepare('SELECT COUNT(*) AS count FROM session').get()).toEqual({ count: 3 });
+		} finally {
+			live.close();
+		}
+	});
 	it('restores entries and immutable media into an isolated destination, preserves uncertain charges and resets restored access', async () => {
 		const source = await household();
 		await createBackup(source);
