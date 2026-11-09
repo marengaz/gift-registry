@@ -32,7 +32,13 @@ function authorisedEntry(
 ) {
 	const actor = requireMember(connection, event.locals.actor);
 	const entry = connection.db.select().from(entries).where(eq(entries.id, id)).get();
-	if (!entry) throw new AccessError(404, 'Gift entry not found.');
+	if (
+		!entry ||
+		!connection.sqlite
+			.prepare('SELECT 1 FROM products WHERE id=? AND deleted_at IS NULL')
+			.get(entry.productId)
+	)
+		throw new AccessError(404, 'Gift entry not found.');
 	requireListRole(
 		connection,
 		actor,

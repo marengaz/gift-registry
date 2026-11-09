@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import type { DatabaseConnection } from './db/client';
 import {
 	entries,
@@ -171,15 +171,18 @@ export function visibleEntries(
 ) {
 	const fresh = requireMember(connection, actor);
 	return connection.db
-		.select()
+		.select({ entry: entries })
 		.from(entries)
+		.innerJoin(products, eq(entries.productId, products.id))
 		.where(
 			and(
+				isNull(products.deletedAt),
 				filter.listId ? eq(entries.listId, filter.listId) : undefined,
 				filter.productId ? eq(entries.productId, filter.productId) : undefined
 			)
 		)
 		.all()
+		.map(({ entry }) => entry)
 		.filter(
 			(entry) =>
 				fresh.administrator ||
@@ -194,7 +197,7 @@ export function canReadProduct(
 ): boolean {
 	const fresh = requireMember(connection, actor);
 	const product = connection.db.select().from(products).where(eq(products.id, productId)).get();
-	if (!product) return false;
+	if (!product || product.deletedAt !== null) return false;
 	if (fresh.administrator) return true;
 	const memberships = connection.db
 		.select()
@@ -218,7 +221,12 @@ export function projectProduct(connection: DatabaseConnection, actor: Actor, pro
 	const fresh = requireMember(connection, actor);
 	if (!canReadProduct(connection, fresh, productId)) return null;
 	const product = connection.db.select().from(products).where(eq(products.id, productId)).get()!;
-	const { contributorId, deletedAt: _deletedAt, deletionToken: _deletionToken, ...details } = product;
+	const {
+		contributorId,
+		deletedAt: _deletedAt,
+		deletionToken: _deletionToken,
+		...details
+	} = product;
 	return {
 		...details,
 		...(fresh.administrator ? { contributorId } : {}),

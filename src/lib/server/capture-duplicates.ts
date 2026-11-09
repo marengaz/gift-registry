@@ -25,7 +25,9 @@ export function captureDuplicates(connection: DatabaseConnection, event: Catalog
 		const normalised = productUrl(source);
 		if (!normalised) return { matches: [] };
 		const candidates = connection.sqlite
-			.prepare('SELECT id,source_url FROM products WHERE source_url IS NOT NULL')
+			.prepare(
+				'SELECT id,source_url FROM products WHERE source_url IS NOT NULL AND deleted_at IS NULL'
+			)
 			.all() as { id: string; source_url: string }[];
 		const matches: { id: string; title: string }[] = [];
 		for (const candidate of candidates) {

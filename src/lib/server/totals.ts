@@ -1,8 +1,8 @@
-import { eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { AccessError, requireAdministrator } from './access';
 import type { CatalogueEvent } from './catalogue';
 import type { DatabaseConnection } from './db/client';
-import { entries, lists } from './db/schema';
+import { entries, lists, products } from './db/schema';
 import { apiResponse } from './http';
 export type ValueTotal = { pence: number; unknown: number; count: number };
 export type ListTotals = {
@@ -23,10 +23,11 @@ export function calculateListTotals(
 		allocated: { pence: 0, unknown: 0, count: 0 },
 		purchased: { pence: 0, unknown: 0, count: 0, estimatedCount: 0 }
 	};
-	for (const entry of connection.db
-		.select()
+	for (const { entry } of connection.db
+		.select({ entry: entries })
 		.from(entries)
-		.where(eq(entries.listId, listId))
+		.innerJoin(products, eq(entries.productId, products.id))
+		.where(and(eq(entries.listId, listId), isNull(products.deletedAt)))
 		.all()) {
 		add(totals.all, entry.estimatePence);
 		if (entry.state !== 'available') add(totals.allocated, entry.estimatePence);

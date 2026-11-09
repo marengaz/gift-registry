@@ -341,16 +341,21 @@ export async function runNextJob(
 					: 'No buying pages were matched. Keep this photo and enter the details manually.'
 			};
 		}
-		connection.db
-			.update(lookupJobs)
-			.set({
-				state: 'succeeded',
-				resultJson: JSON.stringify(result),
-				finishedAt: now(),
-				leaseUntil: null
+		connection.sqlite
+			.transaction(() => {
+				actorForJob(connection, job);
+				connection.db
+					.update(lookupJobs)
+					.set({
+						state: 'succeeded',
+						resultJson: JSON.stringify(result),
+						finishedAt: now(),
+						leaseUntil: null
+					})
+					.where(and(eq(lookupJobs.id, job.id), eq(lookupJobs.state, 'running')))
+					.run();
 			})
-			.where(and(eq(lookupJobs.id, job.id), eq(lookupJobs.state, 'running')))
-			.run();
+			.immediate();
 	} catch (error) {
 		const message = dispatched
 			? 'The paid result is uncertain or unavailable. Its allowance remains reserved. Make a new explicit request to try again.'
@@ -389,7 +394,8 @@ export function confirmSuggestion(
 			throw new AccessError(400, 'Choose the suggested fields you want to confirm.');
 		const input = parsed.data;
 		function candidate() {
-			requireAdministrator(connection, event.locals.actor);
+			const actor = requireAdministrator(connection, event.locals.actor);
+			accessible(connection, actor, productId);
 			const job = connection.db
 				.select()
 				.from(lookupJobs)
@@ -500,6 +506,7 @@ export function attachIdentificationPhoto(
 			return connection.sqlite
 				.transaction(() => {
 					requireAdministrator(connection, event.locals.actor);
+					accessible(connection, event.locals.actor, productId);
 					const existing = connection.db
 						.select()
 						.from(lookupJobs)

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { eq } from 'drizzle-orm';
+import { eq, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import {
 	AccessError,
@@ -203,6 +203,7 @@ export function productsGet(connection: DatabaseConnection, event: CatalogueEven
 		const result = connection.db
 			.select()
 			.from(products)
+			.where(isNull(products.deletedAt))
 			.orderBy(products.createdAt)
 			.all()
 			.reverse()
