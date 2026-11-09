@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import type {
 	CatalogueActionAcknowledgement,
@@ -70,11 +70,17 @@ function currentStatus(
 	administratorId: string
 ): CatalogueActionStatus {
 	const latest = connection.db
-		.select({ action: catalogueActions })
+		.select({
+			id: catalogueActions.id,
+			kind: catalogueActions.kind,
+			undoneAt: catalogueActions.undoneAt,
+			resultJson: catalogueActions.resultJson,
+			createdAt: catalogueActions.createdAt
+		})
 		.from(catalogueLatestActions)
 		.innerJoin(catalogueActions, eq(catalogueActions.id, catalogueLatestActions.actionId))
 		.where(eq(catalogueLatestActions.actorId, administratorId))
-		.get()?.action;
+		.get();
 	if (!latest || latest.undoneAt !== null || latest.kind === 'undo')
 		return { administratorId, undo: null };
 	const result = JSON.parse(latest.resultJson) as CatalogueActionAcknowledgement;
@@ -97,7 +103,7 @@ function replay(
 	requestFingerprint: string
 ): CatalogueActionResult | undefined {
 	const receipt = connection.db
-		.select()
+		.select({ fingerprint: catalogueActions.fingerprint, resultJson: catalogueActions.resultJson })
 		.from(catalogueActions)
 		.where(
 			and(eq(catalogueActions.actorId, actorId), eq(catalogueActions.operationId, operationId))
@@ -147,17 +153,18 @@ function record(
 }
 
 function liveProducts(connection: DatabaseConnection, productIds: string[]): Product[] {
-	// Each lookup has one binding, regardless of the size of the selection.
-	const query = connection.sqlite.prepare(
-		'SELECT id FROM products WHERE id=? AND deleted_at IS NULL'
-	);
 	return productIds.map((id) => {
-		if (!query.get(id))
+		const product = connection.db
+			.select()
+			.from(products)
+			.where(and(eq(products.id, id), isNull(products.deletedAt)))
+			.get();
+		if (!product)
 			throw new CatalogueConflict(
 				'stale-target',
 				'An idea is missing or has been deleted. Refresh the catalogue.'
 			);
-		return connection.db.select().from(products).where(eq(products.id, id)).get()!;
+		return product;
 	});
 }
 

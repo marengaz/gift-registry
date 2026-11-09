@@ -131,6 +131,44 @@
 			if (value.administratorId === status.administratorId) undo = value.undo;
 		}
 	}
+	function acknowledgementMessage(result: CatalogueActionResult) {
+		const ack = result.acknowledgement;
+		if (ack.kind === 'undo')
+			return result.undo
+				? 'That Undo request was completed earlier. The latest action is shown above.'
+				: 'Last action undone.';
+		if (ack.effective && result.undo?.actionId !== ack.actionId)
+			return 'This request was completed earlier. It is no longer the latest undoable action.';
+		if (ack.kind === 'delete')
+			return `${ack.productCount} ${ack.productCount === 1 ? 'idea deleted' : 'ideas deleted'}. You can undo this action.`;
+		if (!ack.effective) return 'These ideas were already on the selected lists. Nothing changed.';
+		return `Added ${ack.productCount} ${ack.productCount === 1 ? 'idea' : 'ideas'} (${ack.entryCount} new ${ack.entryCount === 1 ? 'list entry' : 'list entries'}).`;
+	}
+	async function readActionResponse(current: Pending) {
+		const controller = new AbortController();
+		const timeout = setTimeout(() => controller.abort(), 12_000);
+		try {
+			const response = await fetch(
+				current.endpoint === 'undo' ? '/api/catalogue-actions/undo' : '/api/catalogue-actions',
+				{
+					method: 'POST',
+					headers: { 'content-type': 'application/json' },
+					body: JSON.stringify(current.body),
+					signal: controller.signal
+				}
+			);
+			const value = await response.json();
+			return { response, value };
+		} catch {
+			throw new Error(
+				controller.signal.aborted
+					? 'The confirmation took too long. Retry the same request to check its result.'
+					: 'No confirmation was received. Retry the same request to check its result.'
+			);
+		} finally {
+			clearTimeout(timeout);
+		}
+	}
 	async function send(command?: Pending) {
 		if (busy || !navigator.onLine || navigating.to) return;
 		if (command) {
@@ -151,15 +189,7 @@
 		message = '';
 		signInRequired = false;
 		try {
-			const response = await fetch(
-				current.endpoint === 'undo' ? '/api/catalogue-actions/undo' : '/api/catalogue-actions',
-				{
-					method: 'POST',
-					headers: { 'content-type': 'application/json' },
-					body: JSON.stringify(current.body)
-				}
-			);
-			const value = await response.json();
+			const { response, value } = await readActionResponse(current);
 			if (!response.ok) {
 				const error = value as CatalogueActionError;
 				if (response.status === 401 || response.status === 403) {
@@ -197,15 +227,7 @@
 			selected = [];
 			pickerOpen = false;
 			impact = null;
-			const ack = result.acknowledgement;
-			message =
-				ack.kind === 'undo'
-					? 'Last action undone.'
-					: ack.kind === 'delete'
-						? `${ack.productCount} ${ack.productCount === 1 ? 'idea deleted' : 'ideas deleted'}. You can undo this action.`
-						: ack.effective
-							? `Added ${ack.productCount} ${ack.productCount === 1 ? 'idea' : 'ideas'} (${ack.entryCount} new ${ack.entryCount === 1 ? 'list entry' : 'list entries'}).`
-							: 'These ideas were already on the selected lists. Nothing changed.';
+			message = acknowledgementMessage(result);
 			try {
 				await invalidateAll();
 			} catch {

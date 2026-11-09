@@ -381,3 +381,96 @@ test('recovers a lost delete response after reload before confirming its retaine
 	await page.getByRole('button', { name: 'Undo last action', exact: true }).click();
 	await expect(row).toBeVisible();
 });
+
+test('does not promise Undo for a superseded deletion after retry', async ({ page, context }) => {
+	await signIn(context);
+	const database = new Database(join(directory, 'test.sqlite'));
+	database.exec(
+		"INSERT INTO products(id,title,contributor_id) VALUES ('superseded','Earlier deletion','admin')"
+	);
+	database.close();
+	await page.goto(origin + '/catalogue');
+	let lose = true;
+	await page.route('**/api/catalogue-actions', async (route) => {
+		if (route.request().method() === 'POST' && lose) {
+			lose = false;
+			await route.fetch();
+			await route.abort('failed');
+		} else await route.continue();
+	});
+	const row = page
+		.getByRole('article')
+		.filter({ has: page.getByRole('heading', { name: 'Earlier deletion', exact: true }) });
+	await row.getByLabel('More actions for Earlier deletion', { exact: true }).click();
+	await row.getByRole('button', { name: 'Delete idea', exact: true }).click();
+	await expect(page.getByRole('button', { name: 'Retry last request', exact: true })).toBeEnabled();
+	const newer = await context.request.post(origin + '/api/catalogue-actions', {
+		headers: { origin },
+		data: {
+			operationId: crypto.randomUUID(),
+			kind: 'add',
+			productIds: ['cards'],
+			listIds: ['list-40']
+		}
+	});
+	expect(newer.ok()).toBe(true);
+	const latest = await newer.json();
+	await page.getByRole('button', { name: 'Retry last request', exact: true }).click();
+	await expect(page.getByRole('button', { name: 'Retry last request', exact: true })).toHaveCount(
+		0
+	);
+	await expect(page.getByRole('status')).toContainText('completed earlier');
+	await expect(page.getByRole('status')).not.toContainText('You can undo this action');
+	await expect(page.locator('.undo-line')).toContainText('added to lists');
+	expect((await context.request.get(origin + '/api/products/superseded')).status()).toBe(404);
+	const status = await (await context.request.get(origin + '/api/catalogue-actions')).json();
+	expect(status.undo.actionId).toBe(latest.undo.actionId);
+});
+
+test('bounds a stalled acknowledgement and retries its identical committed request', async ({
+	page,
+	context
+}) => {
+	await signIn(context);
+	await page.clock.install();
+	await page.goto(origin + '/catalogue');
+	let markCommitted!: () => void;
+	const committed = new Promise<void>((resolve) => {
+		markCommitted = resolve;
+	});
+	const requests: string[] = [];
+	await page.route('**/api/catalogue-actions', async (route) => {
+		if (route.request().method() !== 'POST') return route.continue();
+		requests.push(route.request().postData()!);
+		if (requests.length === 1) {
+			const response = await route.fetch();
+			expect(response.ok()).toBe(true);
+			markCommitted();
+			// The server committed; leave the browser's acknowledgement pending.
+			return;
+		}
+		await route.continue();
+	});
+	const row = page
+		.getByRole('article')
+		.filter({ has: page.getByRole('heading', { name: 'Card game', exact: true }) });
+	await row.getByRole('button', { name: 'Add to lists', exact: true }).click();
+	const dialog = page.getByRole('dialog', { name: 'Add to lists', exact: true });
+	await dialog.getByLabel('Search lists', { exact: true }).fill('Recipient 44');
+	await dialog.getByRole('checkbox', { name: /Recipient 44/ }).check();
+	await dialog.getByRole('button', { name: 'Add to 1 list', exact: true }).click();
+	await committed;
+	await page.clock.fastForward(30_000);
+	await expect(
+		dialog.getByRole('button', { name: 'Retry last request', exact: true })
+	).toBeEnabled();
+	await expect(dialog).toContainText('confirmation');
+	await dialog.getByRole('button', { name: 'Retry last request', exact: true }).click();
+	await expect(dialog).toBeHidden();
+	expect(requests).toHaveLength(2);
+	expect(requests[1]).toBe(requests[0]);
+	const product = await (await context.request.get(origin + '/api/products/cards')).json();
+	expect(
+		product.entries.filter((entry: { listId: string }) => entry.listId === 'list-44')
+	).toHaveLength(1);
+});
