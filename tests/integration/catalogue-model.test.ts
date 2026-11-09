@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -10,6 +10,7 @@ import {
 import { addProductToList } from '../../src/lib/server/db/catalogue';
 import { entries, lists, products, recipients } from '../../src/lib/server/db/schema';
 import { eq } from 'drizzle-orm';
+import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 
 let directory: string;
 let connection: DatabaseConnection;
@@ -43,6 +44,55 @@ function seed() {
 		.run();
 }
 describe('persistent catalogue boundaries', () => {
+	it('upgrades a populated earlier database and retains durable catalogue recovery on reopen', () => {
+		connection.close();
+		const earlier = join(directory, 'earlier');
+		mkdirSync(join(earlier, 'meta'), { recursive: true });
+		const journal = JSON.parse(readFileSync('drizzle/meta/_journal.json', 'utf8'));
+		journal.entries = journal.entries.filter((entry: { idx: number }) => entry.idx < 4);
+		writeFileSync(join(earlier, 'meta/_journal.json'), JSON.stringify(journal));
+		for (const entry of journal.entries)
+			copyFileSync(`drizzle/${entry.tag}.sql`, join(earlier, `${entry.tag}.sql`));
+		const filename = join(directory, 'earlier.sqlite');
+		connection = createDatabase({ filename });
+		migrate(connection.db, { migrationsFolder: earlier });
+		connection.sqlite.exec(`
+			INSERT INTO recipients (id,name) VALUES ('luke','Luke');
+			INSERT INTO lists (id,recipient_id,name,occasion) VALUES ('luke-birthday','luke','Birthday','Birthday 2026');
+			INSERT INTO products (id,title,contributor_id) VALUES ('card-game','Card game','person-1');
+			INSERT INTO entries (id,product_id,list_id,estimate_pence) VALUES ('entry','card-game','luke-birthday',2050);
+		`);
+		migrateDatabase(connection);
+		const columns = connection.sqlite.prepare('PRAGMA table_info(products)').all() as {
+			name: string;
+		}[];
+		expect(columns.map((column) => column.name)).toEqual(
+			expect.arrayContaining(['deleted_at', 'deletion_token'])
+		);
+		expect(
+			connection.sqlite.prepare('SELECT deleted_at, deletion_token FROM products').get()
+		).toEqual({ deleted_at: null, deletion_token: null });
+		connection.sqlite
+			.prepare(
+				`INSERT INTO catalogue_actions (id,actor_id,operation_id,fingerprint,kind,snapshots_json,result_json) VALUES (?,?,?,?,?,?,?)`
+			)
+			.run('action', 'admin', 'operation', 'canonical', 'add', '[]', '{}');
+		connection.sqlite
+			.prepare('INSERT INTO catalogue_latest_actions (actor_id,action_id) VALUES (?,?)')
+			.run('admin', 'action');
+		connection.close();
+		connection = createDatabase({ filename });
+		migrateDatabase(connection);
+		expect(connection.sqlite.prepare('SELECT estimate_pence FROM entries').get()).toEqual({
+			estimate_pence: 2050
+		});
+		expect(
+			connection.sqlite.prepare('SELECT action_id FROM catalogue_latest_actions').get()
+		).toEqual({ action_id: 'action' });
+		expect(connection.sqlite.prepare('SELECT fingerprint FROM catalogue_actions').get()).toEqual({
+			fingerprint: 'canonical'
+		});
+	});
 	it('reopens migrated records with their integer-pence valuation', () => {
 		seed();
 		const entry = addProductToList(connection, {

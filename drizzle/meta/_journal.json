@@ -29,6 +29,13 @@
       "when": 1794169800000,
       "tag": "0003_gemini-capture",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1794184200000,
+      "tag": "0004_catalogue-actions",
+      "breakpoints": true
     }
   ]
 }

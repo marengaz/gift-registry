@@ -218,7 +218,7 @@ export function projectProduct(connection: DatabaseConnection, actor: Actor, pro
 	const fresh = requireMember(connection, actor);
 	if (!canReadProduct(connection, fresh, productId)) return null;
 	const product = connection.db.select().from(products).where(eq(products.id, productId)).get()!;
-	const { contributorId, ...details } = product;
+	const { contributorId, deletedAt: _deletedAt, deletionToken: _deletionToken, ...details } = product;
 	return {
 		...details,
 		...(fresh.administrator ? { contributorId } : {}),

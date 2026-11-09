@@ -54,6 +54,8 @@ export const products = sqliteTable(
 		sourceUrl: text('source_url'),
 		sourceText: text('source_text'),
 		contributorId: text('contributor_id').notNull(),
+		deletedAt: integer('deleted_at'),
+		deletionToken: text('deletion_token'),
 		createdAt: createdAt(),
 		updatedAt: integer('updated_at').notNull().default(now)
 	},
@@ -213,5 +215,31 @@ export const captureReceipts = sqliteTable(
 	},
 	(table) => [primaryKey({ columns: [table.actorId, table.operationId] })]
 );
+
+export const catalogueActions = sqliteTable(
+	'catalogue_actions',
+	{
+		id: text('id').primaryKey(),
+		actorId: text('actor_id').notNull(),
+		operationId: text('operation_id').notNull(),
+		fingerprint: text('fingerprint').notNull(),
+		kind: text('kind', { enum: ['add', 'delete', 'undo'] }).notNull(),
+		snapshotsJson: text('snapshots_json').notNull(),
+		resultJson: text('result_json').notNull(),
+		undoneAt: integer('undone_at'),
+		createdAt: createdAt()
+	},
+	(table) => [
+		uniqueIndex('catalogue_actions_actor_operation_unique').on(table.actorId, table.operationId),
+		check('catalogue_actions_kind', sql`${table.kind} IN ('add', 'delete', 'undo')`)
+	]
+);
+
+export const catalogueLatestActions = sqliteTable('catalogue_latest_actions', {
+	actorId: text('actor_id').primaryKey(),
+	actionId: text('action_id')
+		.notNull()
+		.references(() => catalogueActions.id, { onDelete: 'restrict' })
+});
 
 export { identificationSettings, lookupJobs, allowanceReservations } from './enrichment-schema';
