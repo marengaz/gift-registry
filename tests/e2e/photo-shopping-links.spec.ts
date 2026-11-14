@@ -694,3 +694,324 @@ test('requires a fresh human attestation when applying a suggestion changes the 
 		await context.close();
 	}
 });
+
+test('keeps the admitted job when an older status response arrives last', async ({ browser }) => {
+	const context = await contextFor(browser);
+	const page = await context.newPage();
+	let release: () => void = () => {};
+	try {
+		const product = await savedPhoto(context, 'Ordered photo status');
+		await page.goto(origin + '/products/' + product.id);
+		await expect(
+			page.getByRole('button', { name: 'Find where to buy', exact: true })
+		).toBeEnabled();
+		let posts = 0;
+		let captured: () => void = () => {};
+		const oldSnapshot = new Promise<void>((resolve) => (captured = resolve));
+		const delayed = new Promise<void>((resolve) => (release = resolve));
+		let holdNextStatus = true;
+		await page.route(`**/api/products/${product.id}/identify`, async (route) => {
+			if (route.request().method() === 'POST') {
+				posts++;
+				return route.continue();
+			}
+			if (!holdNextStatus) return route.continue();
+			holdNextStatus = false;
+			const response = await route.fetch();
+			expect((await response.json()).jobs).toHaveLength(0);
+			captured();
+			await delayed;
+			await route.fulfill({ response }).catch(() => {});
+		});
+		await page.getByRole('button', { name: 'Refresh photo search status', exact: true }).click();
+		await oldSnapshot;
+		await page.getByRole('button', { name: 'Find where to buy', exact: true }).click();
+		await expect(
+			page.getByRole('heading', { name: 'Photo search · queued', exact: true })
+		).toBeVisible();
+		await expect(
+			page.getByText('The result of the saved request is not yet known.', { exact: false })
+		).toHaveCount(0);
+		const returned = page.waitForResponse(
+			(response) =>
+				response.url().endsWith(`/api/products/${product.id}/identify`) &&
+				response.request().method() === 'GET'
+		);
+		release();
+		await returned;
+		// Let the released fetch and Svelte's next paint finish before checking retained state.
+		await page.evaluate(
+			() =>
+				new Promise<void>((resolve) =>
+					requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+				)
+		);
+		expect(
+			await page.getByRole('heading', { name: 'Photo search · queued', exact: true }).count()
+		).toBe(1);
+		expect(await page.getByRole('button', { name: 'Searching…', exact: true }).count()).toBe(1);
+		await expect(page.getByRole('button', { name: 'Searching…', exact: true })).toBeDisabled();
+		expect(posts).toBe(1);
+		const status = await (
+			await context.request.get(origin + `/api/products/${product.id}/identify`)
+		).json();
+		expect(status.jobs).toHaveLength(1);
+	} finally {
+		release();
+		await context.close();
+	}
+});
+
+for (const mutation of ['add', 'check', 'uncheck'] as const) {
+	test(`refreshes saved link state after a photo switch during ${mutation}`, async ({
+		browser
+	}) => {
+		const context = await contextFor(browser);
+		const page = await context.newPage();
+		let release: () => void = () => {};
+		try {
+			const product = await savedPhoto(context, `Photo switch during ${mutation}`);
+			const uploaded = await context.request.post(
+				origin + `/api/products/${product.id}/identify/photo`,
+				{
+					headers: { origin },
+					multipart: {
+						operationId: crypto.randomUUID(),
+						photo: {
+							name: 'another-photo.png',
+							mimeType: 'image/png',
+							buffer: await sharp({
+								create: { width: 4, height: 4, channels: 3, background: 'red' }
+							})
+								.png()
+								.toBuffer()
+						}
+					}
+				}
+			);
+			expect(uploaded.ok()).toBe(true);
+			const db = createDatabase({ filename: join(directory, 'gifts.sqlite') });
+			const jobId = crypto.randomUUID();
+			try {
+				db.sqlite
+					.prepare(
+						"INSERT INTO lookup_jobs(id,product_id,media_id,actor_id,actor_session_id,operation_id,fingerprint,provider,kind,state,result_json) VALUES(?,?,?,'admin','session-admin',?,?,'serpapi','vision','succeeded',?)"
+					)
+					.run(
+						jobId,
+						product.id,
+						product.media[0].id,
+						crypto.randomUUID(),
+						crypto.randomUUID(),
+						JSON.stringify({
+							provider: 'serpapi',
+							suggestions: [candidate],
+							labels: [],
+							matchingPages: [],
+							message: 'Possible matches need checking.'
+						})
+					);
+			} finally {
+				db.close();
+			}
+			if (mutation !== 'add') {
+				const added = await context.request.post(
+					origin + `/api/products/${product.id}/identify/confirm`,
+					{ headers: { origin }, data: { jobId, index: 0, fields: ['offer'] } }
+				);
+				expect(added.ok()).toBe(true);
+			}
+			if (mutation === 'uncheck') {
+				const saved = await (
+					await context.request.get(origin + `/api/products/${product.id}`)
+				).json();
+				const offer = saved.offers[0];
+				const checked = await context.request.post(
+					origin + `/api/products/${product.id}/offers/${offer.id}/check`,
+					{
+						headers: { origin },
+						data: {
+							checked: true,
+							reviewedURL: offer.url,
+							reviewFingerprint: offer.reviewFingerprint
+						}
+					}
+				);
+				expect(checked.ok()).toBe(true);
+			}
+			await page.goto(origin + '/products/' + product.id);
+			const photo = page.getByRole('combobox', { name: 'Photo to search', exact: true });
+			await photo.selectOption(product.media[0].id);
+			await expect(
+				page.getByRole('heading', { name: 'Possible wooden train', exact: true })
+			).toBeVisible();
+			let committed: () => void = () => {};
+			const saved = new Promise<void>((resolve) => (committed = resolve));
+			const delayed = new Promise<void>((resolve) => (release = resolve));
+			await page.route(
+				`**/api/products/${product.id}/${mutation === 'add' ? 'identify/confirm' : 'offers/*/check'}`,
+				async (route) => {
+					const response = await route.fetch();
+					expect(response.ok()).toBe(true);
+					committed();
+					await delayed;
+					await route.fulfill({ response }).catch(() => {});
+				}
+			);
+			if (mutation === 'check')
+				await page
+					.getByLabel('I have opened this link and checked the product and variant')
+					.check();
+			await page
+				.getByRole('button', {
+					name:
+						mutation === 'add'
+							? 'Add link'
+							: mutation === 'check'
+								? 'Mark checked'
+								: 'Mark unchecked again',
+					exact: true
+				})
+				.click();
+			await saved;
+			await photo.selectOption({ label: 'another-photo.png' });
+			await expect(
+				page.getByRole('button', { name: 'Find where to buy', exact: true })
+			).toBeEnabled();
+			release();
+			const links = page.getByRole('region', { name: 'Shopping links', exact: true });
+			if (mutation === 'check')
+				await expect(links.getByText('Checked by a person on', { exact: false })).toBeVisible();
+			else
+				await expect(
+					links.getByText(
+						'This link may be incorrect. Check the product and variant before buying.',
+						{ exact: true }
+					)
+				).toBeVisible();
+			const updated = await (
+				await context.request.get(origin + `/api/products/${product.id}`)
+			).json();
+			expect(updated.offers).toHaveLength(1);
+			expect(updated.offers[0].checked).toBe(mutation === 'check');
+		} finally {
+			release();
+			await context.close();
+		}
+	});
+}
+
+test('automatically recovers a queued search after one transient status failure', async ({
+	browser
+}) => {
+	const context = await contextFor(browser);
+	const page = await context.newPage();
+	try {
+		const product = await savedPhoto(context, 'Recover automatic photo polling');
+		await page.goto(origin + '/products/' + product.id);
+		let posts = 0;
+		await page.route(`**/api/products/${product.id}/identify`, (route) => {
+			if (route.request().method() === 'POST') posts++;
+			return route.continue();
+		});
+		await page.getByRole('button', { name: 'Find where to buy', exact: true }).click();
+		await expect(
+			page.getByRole('heading', { name: 'Photo search · queued', exact: true })
+		).toBeVisible();
+		await expect(
+			page.getByRole('button', { name: 'Refresh photo search status', exact: true })
+		).toBeEnabled();
+		let failed: () => void = () => {};
+		const failure = new Promise<void>((resolve) => (failed = resolve));
+		let failNextStatus = true;
+		await page.route(`**/api/products/${product.id}/identify`, async (route) => {
+			if (route.request().method() !== 'GET' || !failNextStatus) return route.fallback();
+			failNextStatus = false;
+			await route.fulfill({
+				status: 503,
+				contentType: 'application/json',
+				body: JSON.stringify({ message: 'Temporary status connection failure.' })
+			});
+			failed();
+		});
+		await failure;
+		await expect(
+			page.getByText('Temporary status connection failure.', { exact: true })
+		).toBeVisible();
+		const db = createDatabase({ filename: join(directory, 'gifts.sqlite') });
+		try {
+			db.sqlite
+				.prepare(
+					"UPDATE lookup_jobs SET state='succeeded',result_json=?,finished_at=? WHERE product_id=?"
+				)
+				.run(
+					JSON.stringify({
+						provider: 'serpapi',
+						suggestions: [candidate],
+						labels: [],
+						matchingPages: [],
+						message: 'Automatically recovered possible matches.'
+					}),
+					Date.now(),
+					product.id
+				);
+		} finally {
+			db.close();
+		}
+		await expect(
+			page.getByRole('heading', { name: 'Possible wooden train', exact: true })
+		).toBeVisible({ timeout: 8000 });
+		expect(posts).toBe(1);
+		const status = await (
+			await context.request.get(origin + `/api/products/${product.id}/identify`)
+		).json();
+		expect(status.jobs).toHaveLength(1);
+		expect(status.jobs[0].state).toBe('succeeded');
+	} finally {
+		await context.close();
+	}
+});
+
+test('stops status polling and hides prior search authority after definite access loss', async ({
+	browser
+}) => {
+	const context = await contextFor(browser);
+	const page = await context.newPage();
+	try {
+		await page.clock.install();
+		const product = await savedPhoto(context, 'Revoked photo access');
+		await page.goto(origin + '/products/' + product.id);
+		await page.getByRole('button', { name: 'Find where to buy', exact: true }).click();
+		await expect(
+			page.getByRole('heading', { name: 'Photo search · queued', exact: true })
+		).toBeVisible();
+		await expect(
+			page.getByRole('button', { name: 'Refresh photo search status', exact: true })
+		).toBeEnabled();
+		let statusGets = 0;
+		await page.route(`**/api/products/${product.id}/identify`, async (route) => {
+			if (route.request().method() !== 'GET') return route.continue();
+			statusGets++;
+			await route.fulfill({ status: 403, contentType: 'text/plain', body: 'Access denied' });
+		});
+		await page.clock.runFor(2100);
+		await expect(
+			page.getByText('This action could not be completed. Your saved idea is unchanged.', {
+				exact: true
+			})
+		).toBeVisible();
+		await expect(page.getByRole('heading', { name: /Photo search ·/ })).toHaveCount(0);
+		await expect(page.getByRole('button', { name: 'Find where to buy', exact: true })).toHaveCount(
+			0
+		);
+		await expect(
+			page.getByRole('button', { name: 'Make a separate search request', exact: true })
+		).toHaveCount(0);
+		await page.clock.runFor(6000);
+		await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+		await page.clock.runFor(2100);
+		expect(statusGets).toBe(1);
+	} finally {
+		await context.close();
+	}
+});

@@ -41,6 +41,7 @@
 	let reviewed = $state<Record<string, string | undefined>>({});
 	let contextLost = $state(false);
 	let version = 0;
+	let refreshVersion = 0;
 	let disposed = false;
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	const searching = $derived(jobs.some((job) => ['queued', 'running'].includes(job.state)));
@@ -55,34 +56,44 @@
 	function snapshot() {
 		return { productId: product.id, mediaId, version, actorId };
 	}
-	function current(context: ReturnType<typeof snapshot>) {
+	function currentProduct(context: ReturnType<typeof snapshot>) {
 		return (
 			!disposed &&
 			!contextLost &&
 			context.productId === product.id &&
-			context.mediaId === mediaId &&
-			context.version === version &&
 			(!context.actorId || context.actorId === actorId)
 		);
+	}
+	function current(context: ReturnType<typeof snapshot>) {
+		return currentProduct(context) && context.mediaId === mediaId && context.version === version;
 	}
 	function storageKey() {
 		return `photo-shopping:${actorId}:${product.id}:${mediaId}`;
 	}
+	class RequestError extends Error {
+		readonly status: number;
+		constructor(message: string, status: number) {
+			super(message);
+			this.status = status;
+		}
+	}
 	async function json<T>(url: string, init?: RequestInit): Promise<T> {
 		const response = await fetch(url, { cache: 'no-store', ...init });
-		const result = await response.json();
-		if (!response.ok)
-			throw new Error(
-				result.message || 'This action could not be completed. Your saved idea is unchanged.'
+		if (!response.ok) {
+			const result = await response.json().catch(() => null);
+			throw new RequestError(
+				result?.message || 'This action could not be completed. Your saved idea is unchanged.',
+				response.status
 			);
-		return result as T;
+		}
+		return (await response.json()) as T;
 	}
-	async function fresh(context: ReturnType<typeof snapshot>) {
+	async function fresh(context: ReturnType<typeof snapshot>, isCurrent = current) {
 		const [person, status] = await Promise.all([
 			json<Identity>('/api/me'),
 			json<Status>(`/api/products/${context.productId}/identify`)
 		]);
-		if (!current(context)) return null;
+		if (!isCurrent(context)) return null;
 		if (actorId && person.id !== actorId) {
 			contextLost = true;
 			canIdentify = false;
@@ -100,11 +111,14 @@
 		pending = null;
 	}
 	async function refresh() {
+		if (disposed || contextLost) return;
 		const context = snapshot();
+		const generation = ++refreshVersion;
+		const latest = () => generation === refreshVersion && current(context);
 		clearTimeout(timer);
 		try {
-			const live = await fresh(context);
-			if (!live || !current(context)) return;
+			const live = await fresh(context, latest);
+			if (!live || !latest()) return;
 			canIdentify = live.status.canIdentify;
 			currentAdministrator = live.person.administrator && live.status.administrator;
 			enabled = live.status.enabled;
@@ -129,11 +143,18 @@
 			if (jobs.some((job) => ['queued', 'running'].includes(job.state)))
 				timer = setTimeout(() => void refresh(), 2000);
 		} catch (error) {
-			if (current(context))
-				message =
-					error instanceof Error
-						? error.message
-						: 'Photo search status needs an online connection.';
+			if (!latest()) return;
+			message =
+				error instanceof Error ? error.message : 'Photo search status needs an online connection.';
+			if (error instanceof RequestError && [401, 403, 404].includes(error.status)) {
+				contextLost = true;
+				canIdentify = false;
+				currentAdministrator = false;
+				jobs = [];
+				pending = null;
+			} else if (jobs.some((job) => ['queued', 'running'].includes(job.state))) {
+				timer = setTimeout(() => void refresh(), 2000);
+			}
 		}
 	}
 	onMount(() => {
@@ -165,6 +186,8 @@
 	}
 	async function search(separate = false) {
 		if (busy || !mediaId) return;
+		refreshVersion++;
+		clearTimeout(timer);
 		const context = snapshot();
 		busy = true;
 		message = '';
@@ -205,6 +228,8 @@
 				if (response.status < 500) clearPending();
 				throw new Error(result.message || 'The photo search request could not be accepted.');
 			}
+			refreshVersion++;
+			clearTimeout(timer);
 			if (!(await fresh(context)) || !current(context)) return;
 			message = 'Photo search requested. Possible matches still need checking.';
 			await refresh();
@@ -233,7 +258,7 @@
 				headers: { 'content-type': 'application/json' },
 				body: JSON.stringify({ jobId, index, fields: ['offer'] })
 			});
-			if (!(await fresh(context)) || !current(context)) return;
+			if (!(await fresh(context, currentProduct)) || !currentProduct(context)) return;
 			await invalidateAll();
 			if (current(context))
 				message =
@@ -273,7 +298,7 @@
 				headers: { 'content-type': 'application/json' },
 				body: JSON.stringify(body)
 			});
-			if (!(await fresh(context)) || !current(context)) return;
+			if (!(await fresh(context, currentProduct)) || !currentProduct(context)) return;
 			reviewed[offer.id] = undefined;
 			await invalidateAll();
 			if (current(context))
