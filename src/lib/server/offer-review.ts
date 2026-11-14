@@ -136,28 +136,36 @@ export function reconcileOffers(
 		const url = canonicalOfferURL(link.url);
 		groups.set(url, [...(groups.get(url) ?? []), link]);
 	}
+	const reserved = new Set(links.map((link) => link.id).filter((id) => id != null));
 	const used = new Set<string>();
 	const reconciled = [...groups.entries()].map(([url, duplicates]) => {
 		const link = duplicates[0];
-		const candidates = previous.filter(
+		const lineage = previous.filter(
+			(saved) =>
+				duplicates.some((item) => item.id === saved.id) || canonicalOfferURL(saved.url) === url
+		);
+		const reverse = lineage.find((saved) => saved.reverseProvider);
+		const candidates = lineage.filter(
 			(saved) =>
 				!used.has(saved.id) &&
-				(duplicates.some((item) => item.id === saved.id) || canonicalOfferURL(saved.url) === url)
+				(!reserved.has(saved.id) || duplicates.some((item) => item.id === saved.id))
 		);
-		const reverse = candidates.find((saved) => saved.reverseProvider);
 		const owned = candidates.find((saved) => duplicates.some((item) => item.id === saved.id));
 		const exact = candidates.find(
 			(saved) =>
 				saved.priceMinor === (link.priceMinor ?? null) && saved.currency === (link.currency ?? null)
 		);
-		const retained = reverse ?? owned ?? exact;
+		const retained = owned ?? candidates.find((saved) => saved.reverseProvider) ?? exact;
 		if (retained) used.add(retained.id);
 		const sameEvidence =
 			retained &&
 			canonicalOfferURL(retained.url) === url &&
 			retained.priceMinor === (link.priceMinor ?? null) &&
 			retained.currency === (link.currency ?? null);
-		const compatible = retained && retained.checkedFingerprint === reviewFingerprint(product, url);
+		const compatible = lineage.find(
+			(saved) =>
+				saved.reverseProvider && saved.checkedFingerprint === reviewFingerprint(product, url)
+		);
 		return {
 			id: retained?.id ?? randomUUID(),
 			productId,
@@ -166,11 +174,11 @@ export function reconcileOffers(
 			priceMinor: link.priceMinor ?? null,
 			currency: link.currency ?? null,
 			observedAt: sameEvidence ? retained.observedAt : Date.now(),
-			reverseProvider: retained?.reverseProvider ?? null,
-			reverseJobId: retained?.reverseJobId ?? null,
-			checkedAt: compatible ? retained.checkedAt : null,
-			checkedById: compatible ? retained.checkedById : null,
-			checkedFingerprint: compatible ? retained.checkedFingerprint : null
+			reverseProvider: reverse?.reverseProvider ?? null,
+			reverseJobId: reverse?.reverseJobId ?? null,
+			checkedAt: compatible?.checkedAt ?? null,
+			checkedById: compatible?.checkedById ?? null,
+			checkedFingerprint: compatible?.checkedFingerprint ?? null
 		};
 	});
 	connection.db.delete(offers).where(eq(offers.productId, productId)).run();

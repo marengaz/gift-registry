@@ -302,3 +302,50 @@ it.each([true, false])(
 		).toEqual({ estimate_pence: compatible ? 2000 : null });
 	}
 );
+
+it.each([
+	{ movedFirst: true, checked: false },
+	{ movedFirst: false, checked: false },
+	{ movedFirst: true, checked: true },
+	{ movedFirst: false, checked: true }
+])(
+	'preserves reverse origin on the original URL and moved owned offer: %j',
+	async ({ movedFirst, checked }) => {
+		seedJob();
+		await accept();
+		if (checked) markChecked();
+		const original = view().offers[0];
+		const moved = {
+			id: original.id,
+			url: 'https://shop.example/replacement',
+			priceMinor: 2000,
+			currency: 'GBP'
+		};
+		const unchanged = { url: original.url, priceMinor: 2000, currency: 'GBP' };
+		expect((await edit(movedFirst ? [moved, unchanged] : [unchanged, moved])).status).toBe(200);
+		const response = await catalogueActionsPost(
+			context.connection,
+			event({ operationId: randomUUID(), kind: 'add', productIds: ['game'], listIds: ['visible'] })
+		);
+		expect(response.status).toBe(200);
+		expect(
+			context.connection.sqlite
+				.prepare("SELECT estimate_pence FROM entries WHERE product_id='game'")
+				.get()
+		).toEqual({ estimate_pence: checked ? 2000 : null });
+		const saved = view().offers;
+		expect(saved).toHaveLength(2);
+		expect(new Set(saved.map((offer) => offer.id)).size).toBe(2);
+		expect(saved.find((offer) => offer.url === moved.url)).toMatchObject({
+			id: original.id,
+			reverseFound: true,
+			checked: false,
+			checkedAt: null
+		});
+		expect(saved.find((offer) => offer.url === original.url)).toMatchObject({
+			reverseFound: true,
+			checked,
+			checkedAt: checked ? 1000 : null
+		});
+	}
+);
