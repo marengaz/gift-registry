@@ -73,7 +73,7 @@ No automatic purchasing, price monitoring, background/offline search queue, publ
 
 ### Assumptions
 
-The human check attests that the administrator inspected the linked product and variant, not that price or stock will remain current. The UTC calendar-month app counter is independent of SerpAPI's account renewal cycle and usage by other applications. The supplied key has passed an account-only check: Free Plan, 250 searches remaining at that check. No image upload or Lens search has yet been exercised. Fixtures establish local contracts before the bounded live image evaluation.
+The human check attests that the administrator inspected the linked product and variant, not that price or stock will remain current. The UTC calendar-month app counter is independent of SerpAPI's account renewal cycle and usage by other applications. At planning time, the supplied key had passed an account-only check: Free Plan, 250 searches remaining at that check. Implementation subsequently exercised one public image upload and Lens search; see the [live evaluation](../evaluations/2026-11-14-photo-shopping-links.md).
 
 ### Key Technical Decisions
 
@@ -156,7 +156,7 @@ Choose final helper names, reservation fields and timeout values within KTD2–K
 
 **Dependencies:** None.
 
-**Files:** New `drizzle/0006_photo-shopping-links.sql`; `drizzle/meta/_journal.json`; `src/lib/server/db/schema.ts`; `src/lib/server/db/enrichment-schema.ts`; `src/lib/server/enrichment/types.ts`; new `src/lib/shared/photo-shopping-links.ts`; `src/lib/server/access.ts`; `src/lib/server/catalogue.ts`; `src/lib/server/catalogue-actions.ts`; `src/lib/catalogue-types.ts`; `src/lib/server/enrichment/jobs.ts`; new `tests/integration/photo-shopping-model.test.ts` and `tests/integration/photo-shopping-provenance.test.ts`.
+**Files:** New `drizzle/0006_photo-shopping-links.sql`; `drizzle/meta/_journal.json`; `src/lib/server/db/schema.ts`; `src/lib/server/db/enrichment-schema.ts`; `src/lib/server/enrichment/types.ts`; new `src/lib/shared/photo-shopping-links.ts` and `src/lib/server/offer-review.ts`; `src/lib/server/access.ts`; `src/lib/server/catalogue.ts`; `src/lib/server/catalogue-actions.ts`; `src/lib/catalogue-types.ts`; `src/lib/server/enrichment/jobs.ts`; new `tests/integration/photo-shopping-model.test.ts` and `tests/integration/photo-shopping-provenance.test.ts`.
 
 **Approach:** Create provider pinning, count reservations and offer fields, then publish explicit DTOs and the frozen shared contract. Extend owned-ID/canonical-URL reconciliation under KTD3. Cover title/variant changes from both ordinary edits and existing suggestion confirmation. Keep the new UI and routes unattached until the migration barrier is satisfied.
 
@@ -223,7 +223,7 @@ Choose final helper names, reservation fields and timeout values within KTD2–K
 
 **Dependencies:** U1–U3.
 
-**Files:** `tests/integration/backup-restore.test.ts`; `.env.example`; `compose.yaml`; `README.md`; `docs/backup-restore.md`; focused fixtures/evaluation notes under `scripts/fixtures/` and `docs/evaluations/` where needed.
+**Files:** `tests/integration/backup-restore.test.ts`; `.env.example`; `compose.yaml`; `README.md`; `docs/backup-restore.md`; `src/routes/settings/identification/+page.svelte` to distinguish search counts from the existing USD allowance; focused fixtures/evaluation notes under `scripts/fixtures/` and `docs/evaluations/` where needed.
 
 **Approach:** Prove the additive data survives real fixture backup/restore, document the selected service and its app-only cap, and run the repository quality gates. Pass both SerpAPI environment variables to the app and existing worker in Compose. Document starting the existing worker separately during local Vite development; the dev server alone does not run identification jobs. Keep the existing identification-enabled switch authoritative, including its disabled state after restore. Use only a bounded non-personal image for live evaluation with the supplied key. Remove abandoned provider experiments from the feature diff.
 
@@ -246,3 +246,13 @@ The provider adapter tests establish upload/search contracts and redaction. U1 p
 ## Definition of Done
 
 The administrator can save a photograph, find possible buying pages, add one unchecked and explicitly record a human product/variant check. Every actual reverse-link surface shows the correct warning or check state after reload, editing and recovery. Provider requests are private, bounded and counted under the app's limit. Existing family-app contracts and required checks pass, setup gaps are accurately reported, and abandoned code is absent.
+
+## Implementation outcome
+
+Implemented and locally verified on 14 November 2026. The foundation, provider service, interface and recovery/setup work are complete. A private backup was verified before applying the additive migration to the local instance. The website and worker were restarted, and `/health/ready` returned `{"ready":true}`.
+
+The supplied free-plan key successfully searched a public LEGO product image through the actual queue and worker. Results included useful UK buying pages and a different LEGO set, supporting the decision to keep added links unchecked. No household photographs were used in evaluation. The app's configured limit is 200 searches per UTC month.
+
+Final verification passed: type checks with zero errors or warnings, formatting, 75 unit tests, 241 integration tests, 83 browser tests, and app/worker builds. Desktop and phone-width layouts were inspected without horizontal overflow. The completed code review's four findings were fixed and regression-tested: provenance survives both offer input orders; old status responses cannot erase active jobs; successful link mutations refresh after photo switching; and transient status failures resume polling without repeating a provider request. Definite access loss stops that polling.
+
+Physical Android camera/sharing and recognition accuracy for real shop photographs remain device/evaluation checks. A recorded human check does not establish future price, stock or seller reliability. All changes were committed locally.
