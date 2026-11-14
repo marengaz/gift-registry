@@ -10,6 +10,7 @@ import { createBackup, restoreBackup } from '../../scripts/backup.mjs';
 import { createDatabase } from '../../src/lib/server/db/client';
 import { canReadProduct, requireMediaAccess, resolveActor } from '../../src/lib/server/access';
 import { allocationPost } from '../../src/lib/server/allocations';
+import { identifyPost } from '../../src/lib/server/enrichment/jobs';
 import {
 	catalogueActionsPost,
 	catalogueActionsUndoPost
@@ -78,6 +79,90 @@ async function household() {
 	return { root, databasePath, mediaPath, destination: join(root, 'backup') };
 }
 describe('consistent household recovery', () => {
+	it('retains checked photo-search links and search reservations while leaving restored identification disabled', async () => {
+		const source = await household();
+		const live = createDatabase({ filename: source.databasePath });
+		let savedOffers: unknown;
+		let savedReservations: unknown;
+		try {
+			live.sqlite.exec(`
+				INSERT INTO lookup_jobs(id,product_id,actor_id,actor_session_id,operation_id,fingerprint,kind,provider,media_id,state,dispatched_at,result_json)
+				VALUES ('lens-complete','gift','admin','session-admin','lens-complete','complete','vision','serpapi','photo','succeeded',1,'{"suggestions":[],"labels":[],"matchingPages":[],"message":"No matches"}'),
+				('lens-uncertain','gift','admin','session-admin','lens-uncertain','uncertain','vision','serpapi','photo','uncertain',2,NULL);
+				INSERT INTO serpapi_search_reservations(job_id,month,created_at) VALUES ('lens-complete','2026-11',1),('lens-uncertain','2026-11',2);
+				INSERT INTO offers(id,product_id,url,price_minor,currency,reverse_provider,reverse_job_id,checked_at,checked_by_id,checked_fingerprint)
+				VALUES ('checked','gift','https://shop.example/checked',2000,'GBP','serpapi','lens-complete',1000,'admin','["Private gift",null,"https://shop.example/checked"]'),
+				('unchecked','gift','https://shop.example/unchecked',2500,'GBP','serpapi','lens-complete',NULL,NULL,NULL),
+				('manual','gift','https://shop.example/manual',3000,'GBP',NULL,NULL,NULL,NULL,NULL);
+			`);
+			savedOffers = live.sqlite.prepare('SELECT * FROM offers ORDER BY id').all();
+			savedReservations = live.sqlite
+				.prepare('SELECT * FROM serpapi_search_reservations ORDER BY job_id')
+				.all();
+		} finally {
+			live.close();
+		}
+		await createBackup(source);
+		const destination = join(source.root, 'restored-photo-search');
+		await restoreBackup({ source: source.destination, destination });
+		const restored = createDatabase({ filename: join(destination, 'gifts.sqlite') });
+		try {
+			expect(restored.sqlite.prepare('SELECT * FROM offers ORDER BY id').all()).toEqual(
+				savedOffers
+			);
+			expect(
+				restored.sqlite.prepare('SELECT * FROM serpapi_search_reservations ORDER BY job_id').all()
+			).toEqual(savedReservations);
+			expect(
+				restored.sqlite
+					.prepare("SELECT id,state FROM lookup_jobs WHERE provider='serpapi' ORDER BY id")
+					.all()
+			).toEqual([
+				{ id: 'lens-complete', state: 'succeeded' },
+				{ id: 'lens-uncertain', state: 'uncertain' }
+			]);
+			expect(restored.sqlite.prepare('SELECT count(*) AS count FROM session').get()).toEqual({
+				count: 0
+			});
+			const now = Date.now();
+			restored.sqlite
+				.prepare(
+					'INSERT INTO session(id,user_id,token,expires_at,created_at,updated_at) VALUES (?,?,?,?,?,?)'
+				)
+				.run('restored-admin', 'admin', 'restored-token', now + 3600000, now, now);
+			const actor = resolveActor(restored, 'restored-admin', {
+				administratorEmail: 'admin@example.test'
+			})!;
+			const url = new URL('http://localhost:4173/api/products/gift/identify');
+			const response = await identifyPost(
+				restored,
+				{
+					url,
+					locals: { actor },
+					request: new Request(url, {
+						method: 'POST',
+						headers: { origin: url.origin, 'content-type': 'application/json' },
+						body: JSON.stringify({
+							operationId: randomUUID(),
+							kind: 'vision',
+							provider: 'serpapi',
+							mediaId: 'photo'
+						})
+					})
+				},
+				'gift'
+			);
+			expect(response.status).toBe(409);
+			expect(restored.sqlite.prepare('SELECT enabled FROM identification_settings').get()).toEqual({
+				enabled: 0
+			});
+			expect(
+				restored.sqlite.prepare('SELECT * FROM serpapi_search_reservations ORDER BY job_id').all()
+			).toEqual(savedReservations);
+		} finally {
+			restored.close();
+		}
+	});
 	it('preserves hidden lists, deleted lists and orphan cleanup receipts across a restore', async () => {
 		const source = await household();
 		const connection = createDatabase({ filename: source.databasePath });

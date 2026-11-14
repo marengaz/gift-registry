@@ -52,7 +52,7 @@ npm run backup -- restore --source /BACKUP/BACKUP_NAME --destination /RECOVERY/r
 
 The helper verifies file hashes, database integrity, foreign keys and all referenced images before publishing `restore-notice.json`. It restores gift details, list memberships, allocations, purchases and every stored allowance reservation. It also:
 
-- disables paid identification;
+- disables identification, including SerpAPI photo searches;
 - marks formerly queued/running lookups cancelled, or uncertain if they might have been paid;
 - removes restored sessions, OAuth verification state and unused invitation tokens.
 
@@ -60,9 +60,13 @@ Catalogue deletion markers, action receipts and the latest Undo target are inclu
 
 Hidden and deleted list states, retained list memberships and list-deletion receipts are also preserved. A restored deleted list stays unavailable, and a matching retry confirms its original deletion without applying cleanup again. List deletion has no in-app Undo. Catalogue Undo cannot restore a deleted list or remove its retained memberships.
 
+Reverse-search origin, checked/unchecked link state and exact-product check records are retained. Completed and uncertain SerpAPI search reservations remain counted. Restoring does not turn an unchecked suggestion into a checked link or restart a search.
+
 Existing family membership/grants are retained as snapshot data. Review them before making the recovered service public: revocations performed after the snapshot are not present in an older database. Everyone must sign in again, and pending invitations must be recreated.
 
 An older snapshot cannot know provider charges incurred after it was taken. Keep paid identification disabled until you reconcile those current-month charges against the dedicated project's usage, or wait for a new UTC month before re-enabling it. Restoring does not release any recorded reservation and does not redispatch old lookups.
+
+For SerpAPI, reconcile searches made after the snapshot against the provider account's remaining allowance before re-enabling identification. The app counts UTC calendar months, which may differ from the provider's renewal cycle. A new app month alone does not establish spare provider quota.
 
 ## Check and promote a restored copy
 
