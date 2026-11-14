@@ -73,6 +73,6 @@ jobs:
           IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
         shell: bash
         run: |
-          printf 'Container: `ghcr.io/%s:%s`\n\nDigest: `%s`\n' "$GH_REPO" "$IMAGE_VERSION" "$IMAGE_DIGEST" > "$RUNNER_TEMP/release-notes.md"
+          printf 'Container: ghcr.io/%s:%s\n\nDigest: %s\n' "$GH_REPO" "$IMAGE_VERSION" "$IMAGE_DIGEST" > "$RUNNER_TEMP/release-notes.md"
           gh release create "$RELEASE_TAG" --target "$GITHUB_SHA" --title "$RELEASE_TAG" --generate-notes --notes-file "$RUNNER_TEMP/release-notes.md"
           cat "$RUNNER_TEMP/release-notes.md" >> "$GITHUB_STEP_SUMMARY"
