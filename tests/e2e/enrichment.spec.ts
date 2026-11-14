@@ -254,6 +254,7 @@ test('crops a screenshot locally, fills on request and preserves deliberate edit
 	});
 	try {
 		await page.goto(origin + '/capture');
+		await expect(page.getByText('Adding as admin', { exact: true })).toBeVisible();
 		await page.getByLabel('Product link').fill('https://shop.example/console');
 		await expect(
 			page.getByText("We couldn't read this shop page.", { exact: false })
