@@ -79,16 +79,33 @@
 		</p>
 	</section>
 	<section class="panel">
-		<h2>This UTC month: {data.month}</h2>
+		<h2>Find buying links from photos</h2>
+		<p>
+			{data.serpapi?.configured
+				? 'SerpAPI Google Lens is configured on the server.'
+				: 'Set SERPAPI_API_KEY on the server to configure photo search.'}
+		</p>
+		{#if data.serpapi}<p>
+				{data.serpapi.used} of {data.serpapi.limit} app searches reserved this UTC month;
+				{data.serpapi.remaining} remain.
+			</p>{/if}
+		<p class="muted">
+			Searching sends a compressed photo to SerpAPI and Google. Results may be incorrect until a
+			person checks the linked product and variant. This search count is separate from the USD
+			allowance below and the provider's account-wide allowance. Uncertain requests remain counted.
+		</p>
+	</section>
+	<section class="panel">
+		<h2>Google Vision and Gemini: {data.month}</h2>
 		<p>
 			{usd(data.reservedMicrodollars)} reserved of {usd(data.monthlyLimitMicrodollars)}. {usd(
 				data.remainingMicrodollars
 			)} remains.
 		</p>
 		<p class="muted">
-			Every image is counted at the full conservative unit cost, including free-tier requests.
-			Timeouts and uncertain results stay reserved. This limits requests admitted by this app; it
-			does not cap the project's entire Google bill.
+			Every Google Vision image is counted at the full conservative unit cost, including free-tier
+			requests. Timeouts and uncertain results stay reserved. This limits requests admitted by this
+			app; it does not cap the project's entire Google bill.
 		</p>
 		<p>
 			{data.provider.ready
@@ -108,6 +125,10 @@
 				>Enable AI help and paid image identification</span
 			></label
 		><label>Monthly allowance (USD)<input inputmode="decimal" bind:value={allowance} /></label>
+		<p class="muted">
+			This switch also enables SerpAPI photo searches. Their monthly search limit is set separately
+			with SERPAPI_MONTHLY_SEARCH_LIMIT on the server.
+		</p>
 		<details>
 			<summary>Conservative pricing</summary><label
 				>Microdollars per image<input inputmode="numeric" bind:value={unit} /></label

@@ -4,6 +4,7 @@
 	import { formatPrice, type Product, type Identity } from '#lib/catalogue-types.ts';
 	import type { LookupResult } from '#lib/server/enrichment/types.ts';
 	import type {
+		LookupProvider,
 		PhotoShoppingRequest,
 		OfferCheckRequest,
 		SerpApiSearchStatus
@@ -12,7 +13,7 @@
 	type Job = {
 		id: string;
 		operationId?: string;
-		provider: string;
+		provider: LookupProvider;
 		mediaId: string | null;
 		state: string;
 		createdAt: number;
@@ -191,7 +192,6 @@
 				provider: 'serpapi',
 				mediaId: context.mediaId
 			};
-			// Keep the original operation before sending, so recovery only reads its status.
 			sessionStorage.setItem(storageKey(), JSON.stringify(command));
 			pending = command;
 			const response = await fetch(`/api/products/${context.productId}/identify`, {

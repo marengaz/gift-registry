@@ -25,7 +25,6 @@ export type SerpApiSearchStatus = {
 export function canonicalOfferURL(url: string): string {
 	return new URL(url).href;
 }
-/** Binds a review to the exact product identity and canonical destination. */
 export function reviewFingerprint(
 	product: { title: string; variant?: string | null },
 	url: string

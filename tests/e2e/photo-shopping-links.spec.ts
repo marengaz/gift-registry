@@ -265,10 +265,10 @@ test('saves a photo, finds possible buying pages and adds only an unchecked link
 		await page.keyboard.press('Enter');
 		await expect(
 			page
+				.getByRole('region', { name: 'Shopping links', exact: true })
 				.getByText('This link may be incorrect. Check the product and variant before buying.', {
 					exact: true
 				})
-				.first()
 		).toBeVisible();
 		const product = await (
 			await context.request.get(origin + '/api' + new URL(page.url()).pathname)

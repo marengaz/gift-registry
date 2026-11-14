@@ -369,7 +369,6 @@ export async function runNextJob(
 						suggestion.title = evidence.title ?? suggestion.title;
 						suggestion.description = evidence.description;
 						suggestion.variant = evidence.variant;
-						// The provider destination stays authoritative for selection; metadata cannot redirect it.
 						if (
 							evidence.offer &&
 							new URL(evidence.offer.url).origin === new URL(suggestion.sourceUrl).origin

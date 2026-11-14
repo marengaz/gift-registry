@@ -3,11 +3,12 @@
 	import { invalidateAll } from '$app/navigation';
 	import { formatPrice, type Product } from '#lib/catalogue-types.ts';
 	import type { LookupResult } from '#lib/server/enrichment/types.ts';
+	import type { LookupProvider } from '#lib/shared/photo-shopping-links.ts';
 	type Job = {
 		id: string;
 		operationId?: string;
 		kind: string;
-		provider?: string;
+		provider?: LookupProvider;
 		state: string;
 		createdAt: number;
 		result: LookupResult | null;
@@ -173,17 +174,9 @@
 								>{/each}</select
 						></label
 					>{/if}
-				{#if !enabled}<p>
-						Paid identification is disabled by the administrator.
-					</p>{:else if !configured}<p>
-						Personal Vision credentials need configuring on the server.
-					</p>{/if}
+				{#if !enabled}<p>Paid identification is disabled by the administrator.</p>{/if}
 				<button
-					disabled={busy ||
-						!!pending ||
-						!enabled ||
-						!configured ||
-						(!product.media.length && !product.sourceUrl)}
+					disabled={busy || !!pending || !enabled || (!product.media.length && !product.sourceUrl)}
 					onclick={() => identify('vision')}>Request image matching</button
 				>
 				<p class="muted">

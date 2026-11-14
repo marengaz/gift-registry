@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { and, eq, sql } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import type { DatabaseConnection } from './db/client';
 import { offers, products } from './db/schema';
 import {
@@ -17,7 +17,6 @@ export function invalidateOfferChecks(connection: DatabaseConnection, productId:
 		.where(eq(offers.productId, productId))
 		.run();
 }
-/** Select only reader fields; checking actors and provider provenance stay server-side. */
 type PublicOffer = Pick<
 	typeof offers.$inferSelect,
 	'id' | 'productId' | 'url' | 'retailer' | 'priceMinor' | 'currency' | 'observedAt'
@@ -36,22 +35,27 @@ export function publicOffers(
 			priceMinor: offers.priceMinor,
 			currency: offers.currency,
 			observedAt: offers.observedAt,
-			reverseFound: sql<boolean>`${offers.reverseProvider} IS NOT NULL`.mapWith(Boolean)
+			reverseFound: sql<boolean>`${offers.reverseProvider} IS NOT NULL`.mapWith(Boolean),
+			checkedAt: offers.checkedAt,
+			checkedFingerprint: offers.checkedFingerprint
 		})
 		.from(offers)
 		.where(eq(offers.productId, product.id))
 		.all()
 		.map((offer) => {
 			const fingerprint = reviewFingerprint(product, offer.url);
-			const check = connection.db
-				.select({ checkedAt: offers.checkedAt })
-				.from(offers)
-				.where(and(eq(offers.id, offer.id), eq(offers.checkedFingerprint, fingerprint)))
-				.get();
+			const checkedAt = offer.checkedFingerprint === fingerprint ? offer.checkedAt : null;
 			return {
-				...offer,
-				checked: offer.reverseFound && check?.checkedAt != null,
-				checkedAt: offer.reverseFound ? (check?.checkedAt ?? null) : null,
+				id: offer.id,
+				productId: offer.productId,
+				url: offer.url,
+				retailer: offer.retailer,
+				priceMinor: offer.priceMinor,
+				currency: offer.currency,
+				observedAt: offer.observedAt,
+				reverseFound: offer.reverseFound,
+				checked: offer.reverseFound && checkedAt != null,
+				checkedAt: offer.reverseFound ? checkedAt : null,
 				reviewFingerprint: fingerprint
 			};
 		});
