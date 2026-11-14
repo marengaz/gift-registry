@@ -115,7 +115,10 @@ test('relatives reserve and purchase their own gifts, while administrator assign
 		await expect
 			.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
 			.toBe(true);
-		await page.screenshot({ path: '/private/tmp/gift-buying-mobile.png', fullPage: true });
+		await page.screenshot({
+			path: test.info().outputPath('gift-buying-mobile.png'),
+			fullPage: true
+		});
 		await manage.goto(origin + '/lists/visible');
 		await expect(manage.getByRole('region', { name: 'List totals' })).toContainText('£17.50');
 		const puzzle = manage
@@ -132,7 +135,10 @@ test('relatives reserve and purchase their own gifts, while administrator assign
 			view.getByText('Ask the administrator to record a purchase or change your assignment.')
 		).toBeVisible();
 		await manage.setViewportSize({ width: 1440, height: 1000 });
-		await manage.screenshot({ path: '/private/tmp/gift-buying-desktop.png', fullPage: true });
+		await manage.screenshot({
+			path: test.info().outputPath('gift-buying-desktop.png'),
+			fullPage: true
+		});
 	} finally {
 		await buyer.close();
 		await viewer.close();

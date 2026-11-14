@@ -287,7 +287,10 @@ test('crops a screenshot locally, fills on request and preserves deliberate edit
 		await expect
 			.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
 			.toBe(true);
-		await page.screenshot({ path: '/private/tmp/gift-new-capture-mobile.png', fullPage: true });
+		await page.screenshot({
+			path: test.info().outputPath('gift-new-capture-mobile.png'),
+			fullPage: true
+		});
 		expect(imageRequests).toBe(0);
 		await page.getByRole('button', { name: 'Fill from image', exact: true }).click();
 		await expect(page.getByLabel('Estimated price (£)', { exact: true })).toHaveValue('42.00');
@@ -305,7 +308,10 @@ test('crops a screenshot locally, fills on request and preserves deliberate edit
 		await expect
 			.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
 			.toBe(true);
-		await page.screenshot({ path: '/private/tmp/gift-new-capture-desktop.png', fullPage: true });
+		await page.screenshot({
+			path: test.info().outputPath('gift-new-capture-desktop.png'),
+			fullPage: true
+		});
 		await page.getByRole('button', { name: 'Save idea', exact: true }).click();
 		await expect(page.getByRole('heading', { name: 'Idea saved', exact: true })).toBeVisible();
 		const href = await page
@@ -329,7 +335,10 @@ test('crops a screenshot locally, fills on request and preserves deliberate edit
 		expect(savedPixel[1]).toBeGreaterThan(220);
 		expect(savedPixel[2]).toBeLessThan(30);
 		expect(imageRequests).toBe(1);
-		await page.screenshot({ path: '/private/tmp/gift-capture-cropped-mobile.png', fullPage: true });
+		await page.screenshot({
+			path: test.info().outputPath('gift-capture-cropped-mobile.png'),
+			fullPage: true
+		});
 	} finally {
 		await context.close();
 	}
@@ -521,7 +530,10 @@ test('prefills editable source details and privately imports the picture, then c
 		await expect
 			.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
 			.toBe(true);
-		await page.screenshot({ path: '/private/tmp/gift-identification-mobile.png', fullPage: true });
+		await page.screenshot({
+			path: test.info().outputPath('gift-identification-mobile.png'),
+			fullPage: true
+		});
 		await page.goto(origin + '/settings/identification');
 		await expect(
 			page.getByRole('heading', { name: 'Product identification', exact: true })
@@ -532,7 +544,7 @@ test('prefills editable source details and privately imports the picture, then c
 		await expect(page.getByText('Identification settings saved.', { exact: true })).toBeVisible();
 		await page.setViewportSize({ width: 1440, height: 1000 });
 		await page.screenshot({
-			path: '/private/tmp/gift-identification-settings-desktop.png',
+			path: test.info().outputPath('gift-identification-settings-desktop.png'),
 			fullPage: true
 		});
 	} finally {

@@ -108,7 +108,10 @@ test('selects catalogue ideas and finds destination lists across searches', asyn
 	await expect(
 		dialog.getByRole('checkbox', { name: /Child · Birthday/ }).locator('..')
 	).toContainText('1 of 2 already listed');
-	await page.screenshot({ path: '/private/tmp/gift-catalogue-picker-desktop.png', fullPage: true });
+	await page.screenshot({
+		path: test.info().outputPath('gift-catalogue-picker-desktop.png'),
+		fullPage: true
+	});
 	await expect(dialog.getByLabel('Search lists', { exact: true })).toBeFocused();
 	await dialog.getByLabel('Search lists', { exact: true }).fill('Recipient 41');
 	await dialog.getByRole('checkbox', { name: /Recipient 41/ }).check();
@@ -160,14 +163,17 @@ test('keeps selection when switching views, clears it on filters, and cancels a 
 	await expect(page.getByText('1 idea selected', { exact: true })).toBeVisible();
 	await page.setViewportSize({ width: 390, height: 844 });
 	await page.screenshot({
-		path: '/private/tmp/gift-catalogue-selection-mobile.png',
+		path: test.info().outputPath('gift-catalogue-selection-mobile.png'),
 		fullPage: true
 	});
 	await page.getByRole('button', { name: 'Add selected to lists', exact: true }).click();
 	await expect
 		.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
 		.toBe(true);
-	await page.screenshot({ path: '/private/tmp/gift-catalogue-picker-mobile.png', fullPage: true });
+	await page.screenshot({
+		path: test.info().outputPath('gift-catalogue-picker-mobile.png'),
+		fullPage: true
+	});
 	await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
 	for (const path of ['/lists/visible', '/inbox', '/my-gifts']) {
 		await page.goto(origin + path);

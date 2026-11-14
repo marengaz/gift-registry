@@ -332,14 +332,20 @@ test('names the confirmation, contains keyboard focus and cancels without naviga
 		)
 	).toEqual({ count: 0 });
 	await openDelete(page, 'keyboard');
-	await page.screenshot({ path: '/private/tmp/gift-list-delete-desktop.png', fullPage: true });
+	await page.screenshot({
+		path: test.info().outputPath('gift-list-delete-desktop.png'),
+		fullPage: true
+	});
 	await page.setViewportSize({ width: 390, height: 844 });
 	await expect
 		.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
 		.toBe(true);
-	await page.screenshot({ path: '/private/tmp/gift-list-delete-mobile.png', fullPage: true });
+	await page.screenshot({
+		path: test.info().outputPath('gift-list-delete-mobile.png'),
+		fullPage: true
+	});
 	await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
-	await page.screenshot({ path: '/private/tmp/gift-lists-mobile.png', fullPage: true });
+	await page.screenshot({ path: test.info().outputPath('gift-lists-mobile.png'), fullPage: true });
 });
 
 test('requires deliberate fresh confirmation after buying and membership change without resetting cleanup', async ({
