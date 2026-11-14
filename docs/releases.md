@@ -24,6 +24,8 @@ Publication is serialised and is not cancelled mid-push. If several changes merg
 
 Images are published to `ghcr.io/marengaz/gift-registry` with `0.1.0`, `v0.1.0`, `sha-<full commit>` and `latest` style tags. Pin a numbered version or digest for home deployments. `latest` moves with each successful publication; it does not update a running container automatically. The same image starts the web app or, with `node build-worker/worker.js`, the worker. Keep their versions aligned and back up the data volume before upgrading.
 
+Before creating the GitHub release, publication pulls the pushed image by digest, starts it, checks readiness, and verifies its package version, architecture and revision/version labels.
+
 The initial target is **Linux AMD64**, for an Intel/AMD home server. ARM64 is not yet built. The final image includes the MIT licence and source, revision and version labels. Builds publish provenance and software-bill-of-materials attestations.
 
 ## Usage and costs

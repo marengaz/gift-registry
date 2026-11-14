@@ -63,6 +63,15 @@ jobs:
           cache-to: type=gha,mode=min
           provenance: true
           sbom: true
+      - name: Verify published image
+        if: steps.release.outputs.publish == 'true'
+        env:
+          IMAGE: ghcr.io/${{ github.repository }}@${{ steps.image.outputs.digest }}
+          IMAGE_VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          docker pull "$IMAGE"
+          bash scripts/container-smoke.sh "$IMAGE" "$IMAGE_VERSION"
+          docker image inspect "$IMAGE" | jq --exit-status --arg version "$IMAGE_VERSION" --arg revision "$GITHUB_SHA" '.[0] | .Architecture == "amd64" and .Config.Labels["org.opencontainers.image.version"] == $version and .Config.Labels["org.opencontainers.image.revision"] == $revision'
       - name: Create GitHub release
         if: steps.release.outputs.publish == 'true'
         env:
