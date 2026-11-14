@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import MetadataPrefill from './MetadataPrefill.svelte';
 	import ImageCaptureTools from './ImageCaptureTools.svelte';
+	import { reviewFingerprint } from '#lib/shared/photo-shopping-links.ts';
 	import { markEdited } from '#lib/client/capture-autofill.ts';
 	import type { CaptureDraft, GiftList } from '#lib/catalogue-types.ts';
 	let {
@@ -60,6 +61,17 @@
 			window.removeEventListener('offline', update);
 		};
 	});
+	function stillChecked(offer: CaptureDraft['offers'][number]) {
+		try {
+			return (
+				offer.checked &&
+				offer.reviewFingerprint ===
+					reviewFingerprint({ title: draft.title, variant: draft.variant || null }, offer.url)
+			);
+		} catch {
+			return false;
+		}
+	}
 	function submit() {
 		if (
 			!draft.title.trim() &&
@@ -257,6 +269,12 @@
 					class="shopping-row"
 					oninput={() => markEdited(draft, 'offers')}
 				>
+					{#if offer.reverseFound}{#if stillChecked(offer)}<p>
+								Checked by a person on {new Date(offer.checkedAt!).toLocaleDateString('en-GB')}.
+								Changing the link, title or variant will require another check.
+							</p>{:else}<p class="notice">
+								This link may be incorrect. Check the product and variant before buying.
+							</p>{/if}{/if}
 					<label>Retailer <input bind:value={offer.retailer} placeholder="Shop name" /></label>
 					<label>Link <input type="url" bind:value={offer.url} placeholder="https://…" /></label>
 					<div class="form-grid">

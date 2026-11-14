@@ -7,6 +7,7 @@
 		id: string;
 		operationId?: string;
 		kind: string;
+		provider?: string;
 		state: string;
 		createdAt: number;
 		result: LookupResult | null;
@@ -17,6 +18,7 @@
 	let canIdentify = $state(false);
 	let enabled = $state(false);
 	let configured = $state(false);
+	let serpapiConfigured = $state(false);
 	let busy = $state(false);
 	let message = $state('');
 	let mediaId = $state('');
@@ -38,13 +40,14 @@
 				jobs = [];
 				throw new Error(result.message);
 			}
-			jobs = result.jobs;
+			jobs = result.jobs.filter((job: Job) => job.provider !== 'serpapi');
 			for (const job of jobs)
 				for (let index = 0; index < (job.result?.suggestions.length ?? 0); index++)
 					selections[`${job.id}-${index}`] ??= [];
 			canIdentify = result.canIdentify;
 			enabled = result.enabled;
 			configured = result.visionConfigured;
+			serpapiConfigured = result.serpapi?.configured ?? false;
 			if (pending && jobs.some((job) => job.operationId === pending?.operationId)) pending = null;
 			clearTimeout(timer);
 			if (!disposed && jobs.some((job) => ['queued', 'running'].includes(job.state)))
@@ -132,7 +135,7 @@
 			if (!response.ok) throw new Error(result.message);
 			photo = null;
 			await invalidateAll();
-			message = 'Photo attached. You can now request image matching.';
+			message = 'Photo attached. Open Find where to buy to search it.';
 		} catch (error) {
 			message =
 				error instanceof Error
@@ -157,37 +160,37 @@
 				onclick={() => identify('metadata')}>Read source details</button
 			>
 		</div>
-		<details>
-			<summary>Optional image matching</summary>
-			<p>
-				A photo or accessible source image is sent to your personal Google Vision project only when
-				you request matching. Matches need checking and may not identify the exact variant.
-			</p>
-			{#if product.media.length}<label
-					>Photo to identify<select bind:value={mediaId}
-						><option value="">First attached photo</option>{#each product.media as image}<option
-								value={image.id}>{image.originalName || 'Attached photo'}</option
-							>{/each}</select
-					></label
-				>{/if}
-			{#if !enabled}<p>
-					Paid identification is disabled by the administrator.
-				</p>{:else if !configured}<p>
-					Personal Vision credentials need configuring on the server.
-				</p>{/if}
-			<button
-				disabled={busy ||
-					!!pending ||
-					!enabled ||
-					!configured ||
-					(!product.media.length && !product.sourceUrl)}
-				onclick={() => identify('vision')}>Request image matching</button
-			>
-			<p class="muted">
-				One image uses the configured monthly allowance. Uncertain requests remain counted; paid
-				requests are never retried automatically.
-			</p>
-		</details>{/if}
+		{#if configured && !serpapiConfigured}<details>
+				<summary>Optional image matching</summary>
+				<p>
+					A photo or accessible source image is sent to your personal Google Vision project only
+					when you request matching. Matches need checking and may not identify the exact variant.
+				</p>
+				{#if product.media.length}<label
+						>Photo to identify<select bind:value={mediaId}
+							><option value="">First attached photo</option>{#each product.media as image}<option
+									value={image.id}>{image.originalName || 'Attached photo'}</option
+								>{/each}</select
+						></label
+					>{/if}
+				{#if !enabled}<p>
+						Paid identification is disabled by the administrator.
+					</p>{:else if !configured}<p>
+						Personal Vision credentials need configuring on the server.
+					</p>{/if}
+				<button
+					disabled={busy ||
+						!!pending ||
+						!enabled ||
+						!configured ||
+						(!product.media.length && !product.sourceUrl)}
+					onclick={() => identify('vision')}>Request image matching</button
+				>
+				<p class="muted">
+					One image uses the configured monthly allowance. Uncertain requests remain counted; paid
+					requests are never retried automatically.
+				</p>
+			</details>{/if}{/if}
 	{#if administrator}<details>
 			<summary>Add a screenshot or shop photo</summary><label
 				>Additional photo<input
@@ -218,6 +221,15 @@
 				{#each job.result.suggestions as candidate, index}{@const key = `${job.id}-${index}`}
 					<div class="candidate">
 						<h4>{candidate.title || 'Possible buying page'}</h4>
+						{#if job.kind === 'vision'}{@const checkedOffer = product.offers.find(
+								(offer) => offer.url === candidate.offer?.url && offer.checked
+							)}{#if checkedOffer}<p>
+									Checked by a person on {new Date(checkedOffer.checkedAt!).toLocaleDateString(
+										'en-GB'
+									)}.
+								</p>{:else}<p class="notice">
+									This link may be incorrect. Check the product and variant before buying.
+								</p>{/if}{/if}
 						{#if candidate.description}<p>{candidate.description}</p>{/if}{#if candidate.variant}<p>
 								Variant: {candidate.variant}
 							</p>{/if}

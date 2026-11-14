@@ -737,10 +737,12 @@
 						: 'Saved to unlisted ideas.'}
 			</p>
 			<div class="heading-actions">
-				<a class="button" href={`/products/${savedId}`}>View idea</a><button
-					class="secondary"
-					onclick={another}>Add another</button
-				>
+				<a class="button" href={`/products/${savedId}`}>View idea</a>
+				{#if photos.length}<a
+						class="button secondary"
+						href={`/products/${savedId}#find-where-to-buy`}>Find where to buy</a
+					>{/if}
+				<button class="secondary" onclick={another}>Add another</button>
 			</div>
 		</section>
 	{:else if allowed}

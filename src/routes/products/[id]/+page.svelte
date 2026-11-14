@@ -2,12 +2,12 @@
 	import { invalidateAll } from '$app/navigation';
 	import CaptureEditor from '#lib/components/CaptureEditor.svelte';
 	import ProductSuggestions from '#lib/components/ProductSuggestions.svelte';
+	import PhotoShoppingLinks from '#lib/components/PhotoShoppingLinks.svelte';
 	import {
 		draftFromProduct,
 		emptyDraft,
 		capturePayload,
 		money,
-		formatPrice,
 		type Product
 	} from '#lib/catalogue-types.ts';
 	import type { PageProps } from './$types';
@@ -120,20 +120,7 @@
 							Kept in the unlisted inbox. The administrator can add this to a list.
 						</p>{/each}
 				</section>
-				{#if product.offers.length}<section class="panel">
-						<h2>Shopping links</h2>
-						<ul class="link-list">
-							{#each product.offers as offer}<li>
-									<a href={offer.url} target="_blank" rel="noopener noreferrer"
-										>{offer.retailer || new URL(offer.url).hostname} ↗</a
-									>{#if offer.priceMinor != null}<small
-											>{formatPrice(offer.priceMinor, offer.currency ?? 'GBP')} · noted {new Date(
-												offer.observedAt
-											).toLocaleDateString('en-GB')}</small
-										>{/if}
-								</li>{/each}
-						</ul>
-					</section>{/if}
+				{#key product.id}<PhotoShoppingLinks {product} administrator={data.administrator} />{/key}
 				<ProductSuggestions {product} administrator={data.administrator} />
 				{#if product.sourceUrl || product.sourceText}<section class="panel">
 						<h2>Original source</h2>
