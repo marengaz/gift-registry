@@ -1,3 +1,4 @@
+import { publicOffers } from './offer-review';
 import { createHash, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { and, eq, isNull } from 'drizzle-orm';
@@ -188,12 +189,20 @@ function initialEstimate(connection: DatabaseConnection, productId: string): num
 			existing.every((entry) => entry.estimate === existing[0].estimate)
 			? existing[0].estimate
 			: null;
-	const prices = connection.sqlite
-		.prepare(
-			"SELECT DISTINCT price_minor AS price FROM offers WHERE product_id=? AND currency='GBP' AND price_minor IS NOT NULL"
+	const product = connection.db.select().from(products).where(eq(products.id, productId)).get()!;
+	const prices = [
+		...new Set(
+			publicOffers(connection, product)
+				.filter(
+					(offer) =>
+						offer.currency === 'GBP' &&
+						offer.priceMinor !== null &&
+						(!offer.reverseFound || offer.checked)
+				)
+				.map((offer) => offer.priceMinor!)
 		)
-		.all(productId) as { price: number }[];
-	return prices.length === 1 ? prices[0].price : null;
+	];
+	return prices.length === 1 ? prices[0] : null;
 }
 
 function addToLists(

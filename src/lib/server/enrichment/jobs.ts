@@ -16,7 +16,8 @@ import {
 import type { CatalogueEvent } from '../catalogue';
 import type { DatabaseConnection } from '../db/client';
 import { lookupJobs } from '../db/enrichment-schema';
-import { products, media, offers } from '../db/schema';
+import { products, media } from '../db/schema';
+import { acceptSuggestedOffer, invalidateOfferChecks } from '../offer-review';
 import { apiResponse, assertSameOrigin } from '../http';
 import {
 	mediaRoot,
@@ -406,9 +407,9 @@ export function confirmSuggestion(
 					? (JSON.parse(job.resultJson) as LookupResult).suggestions[input.index]
 					: undefined;
 			if (!suggestion) throw new AccessError(404, 'Suggestion not found.');
-			return suggestion;
+			return { suggestion, job: job! };
 		}
-		const suggestion = candidate();
+		const { suggestion } = candidate();
 		let prepared: Awaited<ReturnType<typeof prepareMedia>> | undefined;
 		let committed = false;
 		const filename = `retailer-${input.jobId}-${input.index}.image`;
@@ -432,25 +433,30 @@ export function confirmSuggestion(
 			}
 			connection.sqlite
 				.transaction(() => {
-					const current = candidate();
+					const { suggestion: current, job } = candidate();
+					const product = connection.db
+						.select()
+						.from(products)
+						.where(eq(products.id, productId))
+						.get()!;
 					const updates: Partial<typeof products.$inferInsert> = { updatedAt: Date.now() };
 					for (const field of ['title', 'description', 'variant'] as const)
 						if (input.fields.includes(field) && current[field]) updates[field] = current[field];
+					if (
+						(updates.title !== undefined && updates.title !== product.title) ||
+						(updates.variant !== undefined && updates.variant !== product.variant)
+					)
+						invalidateOfferChecks(connection, productId);
 					connection.db.update(products).set(updates).where(eq(products.id, productId)).run();
 					if (input.fields.includes('offer') && current.offer)
-						connection.db
-							.insert(offers)
-							.values({
-								id: `lookup-${input.jobId}-${input.index}`,
-								productId,
-								url: current.offer.url,
-								retailer: current.offer.retailer,
-								priceMinor: current.offer.fromPrice ? null : current.offer.priceMinor,
-								currency: current.offer.currency,
-								observedAt: current.retrievedAt
-							})
-							.onConflictDoNothing()
-							.run();
+						acceptSuggestedOffer(connection, {
+							productId,
+							jobId: job.id,
+							index: input.index,
+							suggestion: current,
+							provider: job.provider,
+							kind: job.kind
+						});
 					if (
 						prepared &&
 						!connection.db

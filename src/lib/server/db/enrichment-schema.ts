@@ -28,6 +28,9 @@ export const lookupJobs = sqliteTable(
 		actorSessionId: text('actor_session_id').notNull(),
 		operationId: text('operation_id').notNull(),
 		fingerprint: text('fingerprint').notNull(),
+		provider: text('provider', { enum: ['vision', 'serpapi'] })
+			.notNull()
+			.default('vision'),
 		kind: text('kind', { enum: ['metadata', 'vision', 'attachment'] }).notNull(),
 		mediaId: text('media_id'),
 		state: text('state', {
@@ -44,6 +47,10 @@ export const lookupJobs = sqliteTable(
 		createdAt: integer('created_at').notNull().default(now)
 	},
 	(table) => [
+		check(
+			'lookup_provider_valid',
+			sql`${table.provider} IN ('vision','serpapi') AND (${table.provider} = 'vision' OR ${table.kind} = 'vision')`
+		),
 		uniqueIndex('lookup_actor_operation_unique').on(table.actorId, table.operationId),
 		index('lookup_product_index').on(table.productId),
 		index('lookup_state_index').on(table.state)
@@ -66,6 +73,24 @@ export const allowanceReservations = sqliteTable(
 		check(
 			'allowance_amount_positive',
 			sql`typeof(${table.amountMicrodollars})='integer' AND ${table.amountMicrodollars}>0`
+		)
+	]
+);
+
+export const serpapiSearchReservations = sqliteTable(
+	'serpapi_search_reservations',
+	{
+		jobId: text('job_id')
+			.primaryKey()
+			.references(() => lookupJobs.id, { onDelete: 'restrict' }),
+		month: text('month').notNull(),
+		createdAt: integer('created_at').notNull().default(now)
+	},
+	(table) => [
+		index('serpapi_search_month_index').on(table.month),
+		check(
+			'serpapi_search_month_valid',
+			sql`${table.month} GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]' AND substr(${table.month},6,2) BETWEEN '01' AND '12'`
 		)
 	]
 );

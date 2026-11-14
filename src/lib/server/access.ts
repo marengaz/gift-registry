@@ -1,15 +1,7 @@
+import { publicOffers } from './offer-review';
 import { and, eq, isNull } from 'drizzle-orm';
 import type { DatabaseConnection } from './db/client';
-import {
-	entries,
-	lists,
-	media,
-	offers,
-	productLabels,
-	labels,
-	products,
-	recipients
-} from './db/schema';
+import { entries, lists, media, productLabels, labels, products, recipients } from './db/schema';
 
 export type ListRole = 'contributor' | 'buyer' | 'viewer';
 export type Actor = {
@@ -242,7 +234,7 @@ export function projectProduct(connection: DatabaseConnection, actor: Actor, pro
 		...details,
 		...(fresh.administrator ? { contributorId } : {}),
 		entries: visibleEntries(connection, fresh, { productId }),
-		offers: connection.db.select().from(offers).where(eq(offers.productId, productId)).all(),
+		offers: publicOffers(connection, product),
 		media: connection.db
 			.select({ id: media.id, mimeType: media.mimeType, originalName: media.originalName })
 			.from(media)

@@ -1,3 +1,4 @@
+import { reconcileOffers } from './offer-review';
 import { randomUUID } from 'node:crypto';
 import { and, eq, isNull } from 'drizzle-orm';
 import { z } from 'zod';
@@ -19,7 +20,6 @@ import {
 	labels,
 	lists,
 	media,
-	offers,
 	productLabels,
 	products,
 	recipients
@@ -51,6 +51,7 @@ const optionalUrl = url
 const money = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable();
 const offer = z
 	.object({
+		id: text.optional(),
 		url,
 		retailer: optionalText,
 		priceMinor: money.optional(),
@@ -127,27 +128,12 @@ function setDetails(connection: DatabaseConnection, id: string, input: CaptureIn
 		const label = connection.db.select().from(labels).where(eq(labels.name, name)).get()!;
 		connection.db.insert(productLabels).values({ productId: id, labelId: label.id }).run();
 	}
-	const previous = connection.db.select().from(offers).where(eq(offers.productId, id)).all();
-	connection.db.delete(offers).where(eq(offers.productId, id)).run();
-	for (const link of input.offers) {
-		const match = previous.findIndex(
-			(saved) =>
-				new URL(saved.url).href === new URL(link.url).href &&
-				saved.priceMinor === (link.priceMinor ?? null) &&
-				saved.currency === (link.currency ?? null)
-		);
-		const unchanged = match < 0 ? undefined : previous.splice(match, 1)[0];
-		connection.db
-			.insert(offers)
-			.values({
-				id: unchanged?.id ?? randomUUID(),
-				...(unchanged ? { observedAt: unchanged.observedAt } : {}),
-				productId: id,
-				...link,
-				priceMinor: link.priceMinor ?? null,
-				currency: link.currency ?? null
-			})
-			.run();
+	try {
+		reconcileOffers(connection, id, input.offers);
+	} catch (error) {
+		if (error instanceof Error && error.message === 'foreign-offer-id')
+			throw new AccessError(400, 'Choose shopping links belonging to this idea.');
+		throw error;
 	}
 }
 /** Synchronous, current-grant checked write; callers may include this in an outer receipt transaction. */

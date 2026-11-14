@@ -1,3 +1,4 @@
+import type { LookupProvider } from '../../shared/photo-shopping-links';
 export type ProductSuggestion = {
 	title: string | null;
 	description: string | null;
@@ -5,7 +6,7 @@ export type ProductSuggestion = {
 	imageUrl: string | null;
 	sourceUrl: string;
 	retrievedAt: number;
-	source: 'json-ld' | 'open-graph' | 'retailer-page' | 'vision-page' | 'gemini';
+	source: 'json-ld' | 'open-graph' | 'retailer-page' | 'vision-page' | 'gemini' | 'serpapi';
 	offer: {
 		url: string;
 		retailer: string | null;
@@ -17,6 +18,7 @@ export type ProductSuggestion = {
 	uncertainty: string[];
 };
 export type LookupResult = {
+	provider?: LookupProvider;
 	suggestions: ProductSuggestion[];
 	labels: string[];
 	matchingPages: string[];

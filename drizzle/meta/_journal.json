@@ -43,6 +43,13 @@
       "when": 1794187800000,
       "tag": "0005_list-lifecycle",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1794693600000,
+      "tag": "0006_photo-shopping-links",
+      "breakpoints": true
     }
   ]
 }

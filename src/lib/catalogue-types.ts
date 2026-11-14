@@ -1,3 +1,4 @@
+import type { OfferReviewStatus } from './shared/photo-shopping-links';
 import type { projectProduct, visibleLists } from './server/access';
 export type Product = NonNullable<ReturnType<typeof projectProduct>> & { contributorName?: string };
 export type GiftList = ReturnType<typeof visibleLists>[number];
@@ -9,7 +10,13 @@ export type Identity = {
 	administrator: boolean;
 	lists: GiftList[];
 };
-export type ShoppingDraft = { url: string; retailer: string; price: string; currency: string };
+export type ShoppingDraft = OfferReviewStatus & {
+	id?: string;
+	url: string;
+	retailer: string;
+	price: string;
+	currency: string;
+};
 export type CaptureEditedField =
 	'title' | 'description' | 'variant' | 'estimate' | 'offers' | 'photos';
 export type CaptureDraft = {
@@ -57,6 +64,11 @@ export function draftFromProduct(product: Product): CaptureDraft {
 		),
 		labels: product.labels.map((l) => l.name).join(', '),
 		offers: product.offers.map((o) => ({
+			id: o.id,
+			reverseFound: o.reverseFound,
+			checked: o.checked,
+			checkedAt: o.checkedAt,
+			reviewFingerprint: o.reviewFingerprint,
 			url: o.url,
 			retailer: o.retailer ?? '',
 			price: priceInput(o.priceMinor, o.currency ?? 'GBP'),
@@ -122,6 +134,7 @@ export function capturePayload(draft: CaptureDraft) {
 		offers: draft.offers
 			.filter((o) => o.url.trim())
 			.map((o) => ({
+				...(o.id ? { id: o.id } : {}),
 				url: o.url,
 				retailer: o.retailer,
 				priceMinor: parsePriceMinor(o.price, o.currency),

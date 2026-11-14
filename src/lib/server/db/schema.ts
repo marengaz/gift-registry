@@ -142,10 +142,23 @@ export const offers = sqliteTable(
 		retailer: text('retailer'),
 		priceMinor: integer('price_minor'),
 		currency: text('currency'),
-		observedAt: integer('observed_at').notNull().default(now)
+		observedAt: integer('observed_at').notNull().default(now),
+		reverseProvider: text('reverse_provider', { enum: ['vision', 'serpapi'] }),
+		reverseJobId: text('reverse_job_id'),
+		checkedAt: integer('checked_at'),
+		checkedById: text('checked_by_id'),
+		checkedFingerprint: text('checked_fingerprint')
 	},
 	(table) => [
 		index('offers_product_index').on(table.productId),
+		check(
+			'offers_reverse_provider_valid',
+			sql`${table.reverseProvider} IS NULL OR ${table.reverseProvider} IN ('vision','serpapi')`
+		),
+		check(
+			'offers_check_consistent',
+			sql`(${table.checkedAt} IS NULL AND ${table.checkedById} IS NULL AND ${table.checkedFingerprint} IS NULL) OR (${table.reverseProvider} IS NOT NULL AND typeof(${table.checkedAt}) = 'integer' AND ${table.checkedAt} > 0 AND ${table.checkedById} IS NOT NULL AND ${table.checkedFingerprint} IS NOT NULL)`
+		),
 		check(
 			'offers_price_integer_minor',
 			sql`${table.priceMinor} IS NULL OR (typeof(${table.priceMinor}) = 'integer' AND ${table.priceMinor} >= 0 AND ${table.currency} IS NOT NULL)`
@@ -258,4 +271,9 @@ export const catalogueLatestActions = sqliteTable('catalogue_latest_actions', {
 		.references(() => catalogueActions.id, { onDelete: 'restrict' })
 });
 
-export { identificationSettings, lookupJobs, allowanceReservations } from './enrichment-schema';
+export {
+	identificationSettings,
+	lookupJobs,
+	allowanceReservations,
+	serpapiSearchReservations
+} from './enrichment-schema';
