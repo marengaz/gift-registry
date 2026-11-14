@@ -42,6 +42,19 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: npm run verify
+      - name: Validate source and release Compose configurations
+        env:
+          ORIGIN: https://gifts.example.org
+          BETTER_AUTH_SECRET: compose-check-placeholder-not-a-real-secret
+          GOOGLE_CLIENT_ID: compose-check-placeholder
+          GOOGLE_CLIENT_SECRET: compose-check-placeholder
+          ADMINISTRATOR_EMAIL: smoke@example.org
+          PUBLIC_HOSTNAME: gifts.example.org
+          ACME_EMAIL: smoke@example.org
+          GIFT_IMAGE: ghcr.io/marengaz/gift-registry:0.1.0
+        run: |
+          docker compose --env-file /dev/null config --quiet
+          docker compose --env-file /dev/null -f compose.yaml -f compose.release.yaml config --quiet
       - name: Build and smoke-test container
         run: |
           docker build --tag family-gifts:check .
