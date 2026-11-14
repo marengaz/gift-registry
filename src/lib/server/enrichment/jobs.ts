@@ -26,7 +26,9 @@ import {
 	MAX_IMAGE_BYTES,
 	type MediaOptions
 } from '../media';
-import { allowanceSummary, reserveAllowance } from './allowance';
+import { allowanceSummary, reserveAllowance, getIdentificationSettings } from './allowance';
+import { createSerpApiProvider, type SerpApiProvider } from './serpapi';
+import { serpapiStatus, reserveSerpApiSearch } from './serpapi-allowance';
 import { publicFetch } from './fetch';
 import { extractMetadata } from './metadata';
 import { createVisionProvider, visionConfiguration, type VisionProvider } from './vision';
@@ -34,6 +36,7 @@ import type { LookupResult, ProductSuggestion } from './types';
 type Job = typeof lookupJobs.$inferSelect;
 export type WorkerOptions = MediaOptions & {
 	provider?: VisionProvider | null;
+	serpapiProvider?: SerpApiProvider | null;
 	fetchPage?: typeof publicFetch;
 	now?: () => number;
 };
@@ -54,6 +57,8 @@ function publicJob(job: Job, actor: Actor) {
 		id: job.id,
 		...(job.actorId === actor.userId ? { operationId: job.operationId } : {}),
 		kind: job.kind,
+		provider: job.provider,
+		mediaId: job.mediaId,
 		state: job.state,
 		createdAt: job.createdAt,
 		finishedAt: job.finishedAt,
@@ -64,6 +69,7 @@ function publicJob(job: Job, actor: Actor) {
 const queueSchema = z.object({
 	operationId: z.uuid(),
 	kind: z.enum(['metadata', 'vision']),
+	provider: z.enum(['vision', 'serpapi']).optional(),
 	mediaId: z.string().min(1).optional()
 });
 export function identifyPost(
@@ -80,12 +86,21 @@ export function identifyPost(
 				'Choose metadata or image identification and a valid request identifier.'
 			);
 		const input = parsed.data;
+		if (input.kind !== 'vision' && input.provider !== undefined)
+			throw new AccessError(400, 'Retailer metadata does not accept a provider override.');
+		const provider = input.provider ?? 'vision';
 		return connection.sqlite
 			.transaction(() => {
 				const actor = accessible(connection, event.locals.actor, productId, true);
+				const legacyFingerprint = JSON.stringify({
+					productId,
+					kind: input.kind,
+					mediaId: input.mediaId ?? null
+				});
 				const fingerprint = JSON.stringify({
 					productId,
 					kind: input.kind,
+					provider,
 					mediaId: input.mediaId ?? null
 				});
 				const existing = connection.db
@@ -96,7 +111,15 @@ export function identifyPost(
 					)
 					.get();
 				if (existing) {
-					if (existing.fingerprint !== fingerprint)
+					if (
+						existing.provider !== provider ||
+						(existing.fingerprint !== fingerprint &&
+							!(
+								input.provider === undefined &&
+								provider === 'vision' &&
+								existing.fingerprint === legacyFingerprint
+							))
+					)
 						throw new AccessError(409, 'This request identifier was used for different details.');
 					return publicJob(existing, actor);
 				}
@@ -116,7 +139,21 @@ export function identifyPost(
 							409,
 							'Paid identification is disabled. Retailer metadata is still available.'
 						);
-					if (summary.remainingMicrodollars < summary.unitMicrodollars)
+					if (provider === 'serpapi') {
+						const status = serpapiStatus(connection);
+						if (!status.configured)
+							throw new AccessError(
+								409,
+								'Photo search is not configured. Ask the administrator to set SERPAPI_API_KEY.'
+							);
+						if (!status.remaining)
+							throw new AccessError(
+								409,
+								'The monthly photo-search allowance is exhausted. Your saved idea is safe; try in a later month.'
+							);
+						if (!input.mediaId) throw new AccessError(400, 'Choose a photo attached to this idea.');
+					}
+					if (provider === 'vision' && summary.remainingMicrodollars < summary.unitMicrodollars)
 						throw new AccessError(409, 'The monthly identification allowance is exhausted.');
 					if (
 						input.mediaId &&
@@ -143,6 +180,7 @@ export function identifyPost(
 						operationId: input.operationId,
 						fingerprint,
 						kind: input.kind,
+						provider,
 						mediaId: input.mediaId ?? null
 					})
 					.returning()
@@ -172,6 +210,7 @@ export function identifyGet(
 			canIdentify: canCapture(connection, actor),
 			administrator: actor.administrator,
 			visionConfigured: visionConfiguration().ready,
+			serpapi: serpapiStatus(connection),
 			enabled: allowanceSummary(connection).enabled
 		};
 	});
@@ -276,6 +315,84 @@ export async function runNextJob(
 					? 'Review this page evidence before confirming any details.'
 					: 'No product metadata was found. Add a screenshot or enter the details manually.'
 			};
+		} else if (job.provider === 'serpapi') {
+			const provider =
+				options.serpapiProvider === undefined ? createSerpApiProvider() : options.serpapiProvider;
+			if (!provider)
+				throw new AccessError(
+					409,
+					'Photo search is not configured. Ask the administrator to set SERPAPI_API_KEY.'
+				);
+			const guard = () => {
+				actorForJob(connection, job);
+				if (!getIdentificationSettings(connection).enabled)
+					throw new AccessError(409, 'Image identification is disabled. Your saved idea is safe.');
+				if (
+					!job.mediaId ||
+					!connection.db
+						.select()
+						.from(media)
+						.where(and(eq(media.id, job.mediaId), eq(media.productId, job.productId)))
+						.get()
+				)
+					throw new AccessError(404, 'Choose a photo attached to this idea.');
+				const current = connection.db
+					.select()
+					.from(lookupJobs)
+					.where(eq(lookupJobs.id, job.id))
+					.get();
+				if (current?.state !== 'running' || (current.leaseUntil ?? 0) <= now())
+					throw new AccessError(409, 'This request no longer owns the lookup.');
+			};
+			guard();
+			const bytes = await sourceImage(connection, job, options, fetchPage);
+			connection.sqlite
+				.transaction(() => {
+					guard();
+					reserveSerpApiSearch(connection, job.id, now());
+					connection.db
+						.update(lookupJobs)
+						.set({ dispatchedAt: now() })
+						.where(eq(lookupJobs.id, job.id))
+						.run();
+				})
+				.immediate();
+			dispatched = true;
+			const imageId = await provider.upload(bytes, guard);
+			guard();
+			const suggestions = await provider.search(imageId);
+			for (const suggestion of suggestions.slice(0, 3)) {
+				guard();
+				try {
+					const evidence = (await htmlSuggestions(suggestion.sourceUrl, fetchPage))[0];
+					if (evidence) {
+						suggestion.title = evidence.title ?? suggestion.title;
+						suggestion.description = evidence.description;
+						suggestion.variant = evidence.variant;
+						// The provider destination stays authoritative for selection; metadata cannot redirect it.
+						if (
+							evidence.offer &&
+							new URL(evidence.offer.url).origin === new URL(suggestion.sourceUrl).origin
+						)
+							suggestion.offer = { ...evidence.offer, url: suggestion.sourceUrl };
+						suggestion.uncertainty = [...suggestion.uncertainty, ...evidence.uncertainty];
+					}
+				} catch {
+					suggestion.uncertainty.push(
+						'The retailer page could not be read; inspect the destination yourself.'
+					);
+				}
+			}
+			guard();
+			result = {
+				provider: 'serpapi',
+				suggestions,
+				labels: [],
+				matchingPages: suggestions.map((item) => item.sourceUrl),
+				message: suggestions.length
+					? 'Possible image matches. Inspect the exact product and variant before adding a link; adding does not check it.'
+					: 'No buying pages were matched. Your photo is safe; try another photo or enter a shopping link manually.'
+			};
 		} else {
 			const provider = options.provider === undefined ? createVisionProvider() : options.provider;
 			if (!provider)
@@ -345,6 +462,21 @@ export async function runNextJob(
 		connection.sqlite
 			.transaction(() => {
 				actorForJob(connection, job);
+				if (job.provider === 'serpapi') {
+					if (
+						!getIdentificationSettings(connection).enabled ||
+						!job.mediaId ||
+						!connection.db
+							.select()
+							.from(media)
+							.where(and(eq(media.id, job.mediaId), eq(media.productId, job.productId)))
+							.get()
+					)
+						throw new AccessError(
+							409,
+							'Photo search access or settings changed. Make a new explicit request after reviewing them.'
+						);
+				}
 				connection.db
 					.update(lookupJobs)
 					.set({
@@ -359,7 +491,9 @@ export async function runNextJob(
 			.immediate();
 	} catch (error) {
 		const message = dispatched
-			? 'The paid result is uncertain or unavailable. Its allowance remains reserved. Make a new explicit request to try again.'
+			? job.provider === 'serpapi'
+				? 'The photo-search result is uncertain or unavailable. Its search slot remains reserved. Make a new explicit request to try again.'
+				: 'The paid result is uncertain or unavailable. Its allowance remains reserved. Make a new explicit request to try again.'
 			: error instanceof AccessError
 				? error.message
 				: 'This source could not be read or identified. Add a screenshot or photo, or enter the details manually.';

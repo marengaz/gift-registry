@@ -5,13 +5,15 @@ import { apiResponse, assertSameOrigin } from '../http';
 import { allowanceSummary, updateIdentificationSettings } from './allowance';
 import { visionConfiguration } from './vision';
 import { getGeminiStatus } from './gemini';
+import { serpapiStatus } from './serpapi-allowance';
 export function identificationGet(connection: DatabaseConnection, event: CatalogueEvent) {
 	return apiResponse(() => {
 		requireAdministrator(connection, event.locals.actor);
 		return {
 			...allowanceSummary(connection),
 			provider: visionConfiguration(),
-			gemini: getGeminiStatus(connection)
+			gemini: getGeminiStatus(connection),
+			serpapi: serpapiStatus(connection)
 		};
 	});
 }
@@ -26,7 +28,8 @@ export function identificationPost(connection: DatabaseConnection, event: Catalo
 				return {
 					...allowanceSummary(connection),
 					provider: visionConfiguration(),
-					gemini: getGeminiStatus(connection)
+					gemini: getGeminiStatus(connection),
+					serpapi: serpapiStatus(connection)
 				};
 			})
 			.immediate();
