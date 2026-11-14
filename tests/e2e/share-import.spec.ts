@@ -246,7 +246,10 @@ test('imports Android URL, text and photo shares locally and requires an explici
 		await page.getByRole('button', { name: 'Save idea', exact: true }).click();
 		await expect(page.getByRole('heading', { name: 'Idea saved', exact: true })).toBeVisible();
 		expect(counts('Shared photo train')).toEqual({ products: 1, media: 1, entries: 1 });
-		await page.screenshot({ path: '/private/tmp/gift-share-mobile.png', fullPage: true });
+		await page.screenshot({
+			path: test.info().outputPath('gift-share-mobile.png'),
+			fullPage: true
+		});
 	} finally {
 		await context.close();
 	}

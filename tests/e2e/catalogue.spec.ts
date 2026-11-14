@@ -138,26 +138,41 @@ test('administrator organises, captures with photo, edits and searches at deskto
 	await page.getByRole('button', { name: 'Find ideas' }).click();
 	await expect(page.getByRole('heading', { name: 'Woodland puzzle', exact: true })).toBeVisible();
 	await page.setViewportSize({ width: 1440, height: 1000 });
-	await page.screenshot({ path: '/private/tmp/gift-catalogue-desktop.png', fullPage: true });
+	await page.screenshot({
+		path: test.info().outputPath('gift-catalogue-desktop.png'),
+		fullPage: true
+	});
 	await page.setViewportSize({ width: 390, height: 844 });
 	await expect
 		.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
 		.toBe(true);
-	await page.screenshot({ path: '/private/tmp/gift-catalogue-mobile.png', fullPage: true });
+	await page.screenshot({
+		path: test.info().outputPath('gift-catalogue-mobile.png'),
+		fullPage: true
+	});
 	await page.getByRole('button', { name: 'Compact list', exact: true }).click();
 	const thumbnail = page.getByRole('img', { name: 'Woodland puzzle', exact: true });
 	await expect(thumbnail).toBeVisible();
 	expect((await thumbnail.boundingBox())!.width).toBeLessThanOrEqual(80);
-	await page.screenshot({ path: '/private/tmp/gift-compact-mobile.png', fullPage: true });
+	await page.screenshot({
+		path: test.info().outputPath('gift-compact-mobile.png'),
+		fullPage: true
+	});
 	await page.setViewportSize({ width: 1440, height: 1000 });
-	await page.screenshot({ path: '/private/tmp/gift-compact-desktop.png', fullPage: true });
+	await page.screenshot({
+		path: test.info().outputPath('gift-compact-desktop.png'),
+		fullPage: true
+	});
 	await page.setViewportSize({ width: 390, height: 844 });
 	await page.goto(origin + '/capture');
 	await expect(page.getByLabel('Title', { exact: true })).toBeVisible();
 	await expect
 		.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
 		.toBe(true);
-	await page.screenshot({ path: '/private/tmp/gift-capture-mobile.png', fullPage: true });
+	await page.screenshot({
+		path: test.info().outputPath('gift-capture-mobile.png'),
+		fullPage: true
+	});
 	await page.keyboard.press('Tab');
 	await expect(page.getByRole('link', { name: 'Skip to content' })).toBeFocused();
 	await page.keyboard.press('Enter');

@@ -16,3 +16,6 @@ playwright-report
 tests
 docs
 .DS_Store
+AGENTS.md
+.vscode
+.github

@@ -84,6 +84,10 @@ npx playwright install chromium
 npm run verify
 ```
 
-`verify` runs Svelte/TypeScript checks, the separate service-worker type check, formatting, unit tests, SQLite/HTTP integration tests, a production app/worker build and browser journeys. Tests use isolated data and provider doubles. The optional manual CI workflow is source only; this local repository has no remote or running CI.
+`verify` runs Svelte/TypeScript checks, the separate service-worker type check, formatting, unit tests, SQLite/HTTP integration tests, a production app/worker build and browser journeys. Tests use isolated data and provider doubles. Pull requests and merges to `main` run these checks, a complete-history secret scan and a container smoke test. Merges publish automatically versioned images to GitHub Container Registry. See [Releases and automation](docs/releases.md).
 
 Local automation does not establish a real Google callback, Google Vision compatibility, native Android sharing, iPhone behaviour, container restart or public home reachability. Record those results in the deployment/device checklists when performed.
+
+## Licence
+
+[MIT](LICENSE), including its warranty and liability disclaimers.
