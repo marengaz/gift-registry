@@ -2,7 +2,7 @@
 
 Open a pull request into `main`. Use a Conventional Commit title, such as `fix: preserve the saved photo` or `feat: share a gift list`. The squash title determines the release version. No release ticket, version-bump commit or release PR is needed.
 
-The required **Lint and tests** job checks the title, scans the entire Git history with Gitleaks, validates workflow syntax, checks types and formatting, runs the unit, integration and Chromium browser suites, and builds and starts the Docker container. The same job runs again on `main` before publication. Neither tests nor builds need real sign-in or provider secrets.
+The required **Lint and tests** job checks the title, scans the entire Git history with Gitleaks, validates workflow syntax, checks types and formatting, runs the unit, integration and Chromium browser suites, validates the source/release Compose configurations, and builds and starts the Docker container. The same job runs again on `main` before publication. Neither tests nor builds need real sign-in or provider secrets.
 
 Branch protection applies to administrators too. Changes require a PR, the current checks must pass against an up-to-date base, and review conversations must be resolved. A second person's approval is optional because this is maintained by one owner. Only squash merges are enabled.
 
@@ -21,6 +21,8 @@ The largest change wins. Tags are the version source of truth; the source packag
 Publication is serialised and is not cancelled mid-push. If several changes merge quickly, a queued run may be replaced by the newest run; that release includes every unreleased commit. Runs for an outdated `main` commit skip publication.
 
 ## Container image
+
+For the prebuilt Compose option, follow [Start from a published image](deployment.md#start-from-a-published-image-amd64). It pins one version for both app and worker and retains the existing data volume.
 
 Images are published to `ghcr.io/marengaz/gift-registry` with `0.1.0`, `v0.1.0`, `sha-<full commit>` and `latest` style tags. Pin a numbered version or digest for home deployments. `latest` moves with each successful publication; it does not update a running container automatically. The same image starts the web app or, with `node build-worker/worker.js`, the worker. Keep their versions aligned and back up the data volume before upgrading.
 

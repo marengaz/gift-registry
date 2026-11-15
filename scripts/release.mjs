@@ -19,7 +19,7 @@ export function nextVersion(previous, messages) {
 	let [major, minor, patch] = previous.slice(1).split('.').map(Number);
 	if (
 		messages.some(
-			(m) => /^[a-z]+(?:\([^\r\n()]+\))?!: /m.test(m) || /^BREAKING[ -]CHANGE: /m.test(m)
+			(m) => /^[a-z]+(?:\([^\r\n()]+\))?!: /.test(m) || /^BREAKING[ -]CHANGE: /m.test(m)
 		)
 	) {
 		major++;

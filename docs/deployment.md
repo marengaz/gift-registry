@@ -1,6 +1,6 @@
 # Deploy Family gifts at home
 
-Run the app, lookup worker and Caddy HTTPS proxy with Docker Compose on a 64-bit Linux home server. Build on the target `amd64` or `arm64` host so the SQLite and image libraries match it. The supplied image uses Node 26.13.0 on Debian Bookworm; container execution on your actual host remains an acceptance check.
+Run the app, lookup worker and Caddy HTTPS proxy with Docker Compose on a 64-bit Linux home server. Published images target `amd64` (Intel/AMD); use the source-build option below for `arm64`. Both use Node 26.13.0 on Debian Bookworm. Container execution on your actual host remains an acceptance check.
 
 ## Prepare the address and credentials
 
@@ -35,7 +35,28 @@ ADMINISTRATOR_EMAIL=YOUR_ADMINISTRATORS_VERIFIED_GOOGLE_EMAIL
 
 Alternatively, set `ADMINISTRATOR_GOOGLE_SUBJECT` for the exact Google subject. When both are supplied, the subject takes precedence. The first matching, verified sign-in binds the sole administrator's Google subject in SQLite. Visiting first does not grant administrator access. Keep that identity and the authentication secret stable across restarts.
 
-## Start the services
+## Start from a published image (AMD64)
+
+Choose a numbered version from [GitHub releases](https://github.com/marengaz/gift-registry/releases) and set it in `.env`, for example:
+
+```dotenv
+GIFT_IMAGE=ghcr.io/marengaz/gift-registry:0.1.0
+```
+
+From the directory containing `compose.yaml`, use the release override for every command:
+
+```sh
+mkdir -p secrets
+docker compose -f compose.yaml -f compose.release.yaml config --quiet
+docker compose -f compose.yaml -f compose.release.yaml pull app worker
+docker compose -f compose.yaml -f compose.release.yaml up -d --no-build
+```
+
+The override applies the same image to the app and worker. `--no-build` keeps Compose from building the source configuration inherited from the base file. Use the same two `-f` options for `ps`, `logs`, `stop` and later upgrades. Keep the volume names and project directory stable. Configure the hostname, HTTPS route and Google credentials as described above; the image does not contain your settings or household data.
+
+Before upgrading, complete a backup, choose the new version in `.env`, pull both services, then stop and recreate the app and worker using the same files. Keep the database volume. Follow [Back up and restore](backup-restore.md) for recovery; selecting an older image alone does not undo database migrations.
+
+## Build and start from source
 
 Run these commands from the directory containing `compose.yaml`:
 
@@ -95,7 +116,7 @@ The default US$1 UTC-month allowance counts every image at US$0.0035, admitting 
 
 Image matching sends a metadata-stripped derivative to Google and shows candidate pages for confirmation. Private social posts may require a screenshot. Matches do not establish an exact product or variant, and confirming an offer does not change a list's agreed GBP estimate.
 
-## Upgrade and recover
+## Upgrade a source build and recover
 
 1. Create a completed backup and copy it outside the live volume.
 2. Stop the worker and app with `docker compose stop worker app`.

@@ -1,0 +1,6 @@
+# Use with compose.yaml and `up --no-build` to run a published version.
+services:
+  app:
+    image: ${GIFT_IMAGE:?Set GIFT_IMAGE to a numbered GHCR image in .env}
+  worker:
+    image: ${GIFT_IMAGE:?Set GIFT_IMAGE to the same numbered GHCR image in .env}
