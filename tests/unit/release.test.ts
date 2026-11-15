@@ -15,6 +15,11 @@ describe('automatic release policy', () => {
 			nextVersion('v0.4.9', ['refactor: change API\n\nBREAKING CHANGE: remove the old API'])
 		).toBe('1.0.0');
 	});
+	it('does not treat a commit example in the body as a breaking subject', () => {
+		expect(
+			nextVersion('v1.4.9', ['docs: explain titles\n\nFor example:\nfix!: replace the API'])
+		).toBe('1.4.10');
+	});
 	it('rejects malformed versions and empty releases', () => {
 		expect(() => nextVersion('v01.2.3', ['fix: bug'])).toThrow();
 		expect(() => nextVersion('v1.2.3', [])).toThrow();
