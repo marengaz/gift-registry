@@ -1,16 +1,25 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { afterNavigate } from '$app/navigation';
 	import { page } from '$app/state';
 	import type { Identity } from '#lib/catalogue-types.ts';
 	import SignOut from './SignOut.svelte';
 	let person = $state<Identity | null>(null);
-	afterNavigate(async () => {
+	async function refreshIdentity() {
 		try {
 			const response = await fetch('/api/me', { cache: 'no-store' });
 			person = response.ok ? await response.json() : null;
 		} catch {
 			person = null;
 		}
+	}
+	afterNavigate(refreshIdentity);
+	onMount(() => {
+		const online = () => {
+			void refreshIdentity();
+		};
+		window.addEventListener('online', online);
+		return () => window.removeEventListener('online', online);
 	});
 	const canSeeCatalogue = $derived(person?.administrator || person?.collaborator);
 	const contributes = $derived(

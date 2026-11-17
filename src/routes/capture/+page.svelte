@@ -83,6 +83,7 @@
 	async function keepLocally(incomingShare?: boolean) {
 		if (localSaveTask) await localSaveTask;
 		if (blocked || !editorReady || current?.attemptedAt || !hasContents()) return;
+		if (current && !dirty && incomingShare === undefined && releaseEditor) return;
 		const version = openVersion,
 			ownerId = formOwner;
 		const snapshot = JSON.stringify(draft),
@@ -168,7 +169,8 @@
 			if (localError) return;
 			await unlock();
 			reset();
-			await goto('/capture', { replace: true });
+			lastRequestedDraft = null;
+			await goto('/capture', { replaceState: true });
 			message =
 				'Kept on this device. Choose the idea below to continue it; it will not send until you save.';
 		} catch {
@@ -196,7 +198,7 @@
 			showContinuation = false;
 			markClean();
 			await lock();
-			await goto('/capture?draft=' + encodeURIComponent(merged.id), { replace: true });
+			await goto('/capture?draft=' + encodeURIComponent(merged.id), { replaceState: true });
 			message = 'Screenshot added to this idea. Your link, edits and lists are kept.';
 		} catch (error) {
 			message =
@@ -403,6 +405,7 @@
 		let version = openVersion;
 		let ownerId = formOwner;
 		const firstRefresh = firstIdentityPending;
+		let lockedForSync = false;
 		refreshing = true;
 		try {
 			const person = await refreshCaptureIdentity();
@@ -412,7 +415,6 @@
 				if (
 					person?.member &&
 					!busy &&
-					!current &&
 					!destroyed &&
 					(version === openVersion || formOwner === person.id)
 				) {
@@ -420,33 +422,47 @@
 					if (
 						active?.ownerId === person.id &&
 						!busy &&
-						!current &&
 						!destroyed &&
-						(version === openVersion || formOwner === person.id) &&
-						(!formOwner || formOwner === person.id)
+						(version === openVersion || formOwner === person.id)
 					) {
-						if (!formOwner) {
-							openVersion++;
-							formOwner = person.id;
-							busy = false;
+						if (!current && (!formOwner || formOwner === person.id)) {
+							if (!formOwner) {
+								openVersion++;
+								formOwner = person.id;
+								busy = false;
+							}
+							context = active;
+							version = openVersion;
+							ownerId = formOwner;
+							applyRequestedList();
+						} else if (current && !formOwner) {
+							context = active;
 						}
-						context = active;
-						version = openVersion;
-						ownerId = formOwner;
-						applyRequestedList();
 					}
 				}
 			}
-			if (!person?.member || !sameForm(version, ownerId) || dirty) return;
-			busy = true;
+			if (!person?.member || !sameForm(version, ownerId)) return;
 			const target = current;
+			const shouldLockCurrent =
+				!!target &&
+				target.ownerId === person.id &&
+				target.status !== 'saved' &&
+				target.readyToSync !== false &&
+				target.draft.browserCapture?.pendingReview !== true &&
+				!dirty;
+			if (!shouldLockCurrent) {
+				await syncDrafts(draftStore, fetch, person.id);
+				return;
+			}
+			lockedForSync = true;
+			busy = true;
 			await unlock();
 			if (!sameForm(version, ownerId)) return;
-			await syncDrafts(draftStore, fetch, context?.ownerId);
+			await syncDrafts(draftStore, fetch, person.id);
 			if (!sameForm(version, ownerId)) return;
-			const updated = target ? await draftStore.get(target.id, target.ownerId) : undefined;
+			const updated = await draftStore.get(target.id, target.ownerId);
 			if (!sameForm(version, ownerId)) return;
-			if (target) current = updated;
+			current = updated;
 			await lock();
 		} catch {
 			if (firstRefresh) firstIdentityPending = false;
@@ -454,7 +470,7 @@
 				message = 'You are offline. Save an idea on this device and synchronise when connected.';
 		} finally {
 			refreshing = false;
-			if (sameForm(version, ownerId)) busy = false;
+			if (lockedForSync && sameForm(version, ownerId)) busy = false;
 		}
 	}
 	onMount(() => {
@@ -501,7 +517,7 @@
 			if (page.url.hash.startsWith('#gift=')) {
 				try {
 					const imported = await importBrowserCapture(page.url.hash);
-					await goto(`/capture?draft=${encodeURIComponent(imported.id)}`, { replace: true });
+					await goto(`/capture?draft=${encodeURIComponent(imported.id)}`, { replaceState: true });
 				} catch (error) {
 					browserImportError =
 						error instanceof Error && error.name === 'QuotaExceededError'
@@ -707,6 +723,10 @@
 			return;
 		await unlock();
 		reset();
+		if (page.url.searchParams.has('draft')) {
+			lastRequestedDraft = null;
+			await goto('/capture', { replaceState: true });
+		}
 	}
 	const statusText = (record: LocalDraft) =>
 		record.readyToSync === false && !record.attemptedAt

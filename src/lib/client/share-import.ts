@@ -3,6 +3,7 @@ import { emptyDraft, type CaptureDraft } from '../catalogue-types';
 
 const imageTypes = new Set([
 	'image/jpeg',
+	'image/jpg',
 	'image/png',
 	'image/webp',
 	'image/avif',
@@ -43,12 +44,10 @@ export function parseShare(data: FormData): { draft: CaptureDraft; photos: File[
 		.getAll('photos')
 		.filter((value): value is File => value instanceof File && value.size > 0);
 	for (const photo of photos) {
+		const mimeType = photo.type.split(';')[0].trim().toLowerCase();
 		if (
-			!imageTypes.has(photo.type.toLowerCase()) &&
-			!(
-				(!photo.type || photo.type === 'application/octet-stream') &&
-				imageExtension.test(photo.name)
-			)
+			!imageTypes.has(mimeType) &&
+			!((!mimeType || mimeType === 'application/octet-stream') && imageExtension.test(photo.name))
 		)
 			throw new Error(
 				'This file is not a supported photo. Share JPEG, PNG, WebP, AVIF or HEIC/HEIF, or paste its source link instead.'
