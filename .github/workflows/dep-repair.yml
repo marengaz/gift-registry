@@ -166,9 +166,11 @@ jobs:
 
           mapfile -t changed_files < <(git -c core.quotePath=false status --porcelain=v1 -uall | sed -E 's/^.. //; s/^.* -> //')
           if [[ "${#changed_files[@]}" -eq 0 ]]; then
-            echo "has_changes=false" >> "$GITHUB_OUTPUT"
-            echo "verified=false" >> "$GITHUB_OUTPUT"
-            echo "reason=No files were modified by Gemini CLI." >> "$GITHUB_OUTPUT"
+            {
+              echo "has_changes=false"
+              echo "verified=false"
+              echo "reason=No files were modified by Gemini CLI."
+            } >> "$GITHUB_OUTPUT"
             exit 1
           fi
           echo "has_changes=true" >> "$GITHUB_OUTPUT"
@@ -178,8 +180,10 @@ jobs:
           for file in "${changed_files[@]}"; do
             if [[ ! "$file" =~ $allowlist ]]; then
               echo "Disallowed file modified: ${file}"
-              echo "verified=false" >> "$GITHUB_OUTPUT"
-              echo "reason=Repair modified disallowed path: ${file}" >> "$GITHUB_OUTPUT"
+              {
+                echo "verified=false"
+                echo "reason=Repair modified disallowed path: ${file}"
+              } >> "$GITHUB_OUTPUT"
               exit 1
             fi
             if [[ "$file" =~ ^(Dockerfile|compose\.yaml|compose\.release\.yaml|package\.json|package-lock\.json|scripts/) ]]; then
@@ -252,7 +256,7 @@ jobs:
             if [[ -s "$RUNNER_TEMP/repair-summary.md" ]]; then
               cat "$RUNNER_TEMP/repair-summary.md"
             else
-              printf '%s\n' 'Applied compatibility fixes and verified `npm run verify` locally.'
+              printf '%s\n' 'Applied compatibility fixes and verified npm run verify locally.'
             fi
           } > "$RUNNER_TEMP/repair-comment.md"
           gh pr comment "$PR_NUMBER" --repo "$GH_REPO" --body-file "$RUNNER_TEMP/repair-comment.md"

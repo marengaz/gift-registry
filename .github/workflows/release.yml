@@ -95,8 +95,10 @@ jobs:
           )
 
           if [[ "$old_base_digest" == "$new_base_digest" && -z "$pkg_diff" ]]; then
-            echo "needed=false" >> "$GITHUB_OUTPUT"
-            echo "summary=" >> "$GITHUB_OUTPUT"
+            {
+              echo "needed=false"
+              echo "summary="
+            } >> "$GITHUB_OUTPUT"
             echo "Container base image and Debian packages match latest published release; skipping rebuild." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
@@ -105,7 +107,7 @@ jobs:
             echo "needed=true"
             echo "summary<<${delimiter}"
             if [[ "$old_base_digest" != "$new_base_digest" ]]; then
-              printf -- '- Base image digest: `%s` -> `%s`\n' "${old_base_digest:-untracked}" "$new_base_digest"
+              printf -- '- Base image digest: %s -> %s\n' "${old_base_digest:-untracked}" "$new_base_digest"
             fi
             if [[ -n "$pkg_diff" ]]; then
               echo "$pkg_diff"
