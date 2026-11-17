@@ -315,6 +315,8 @@
 			} catch {}
 		}
 		if (changingOwner || !formOwner || formOwner === context?.ownerId) return;
+		const hadUnfinished = !!current || hasContents();
+		let resetSucceeded = false;
 		changingOwner = true;
 		openVersion++;
 		try {
@@ -335,11 +337,19 @@
 			lastRequestedDraft = null;
 			message =
 				'The account changed. Your previous unfinished idea remains on this device under its original account.';
+			resetSucceeded = true;
 		} catch {
 			message =
 				'The account changed and device storage could not preserve the unfinished idea. It is held on this page for its original account. Sign back in as that account and free device storage before saving. Keep this page open.';
 		} finally {
 			changingOwner = false;
+		}
+		if (resetSucceeded && !hadUnfinished && !destroyed) {
+			const requested = page.url.searchParams.get('draft');
+			if (requested && requested !== current?.id) {
+				lastRequestedDraft = requested;
+				void open(requested);
+			}
 		}
 	}
 	async function open(id: string) {
