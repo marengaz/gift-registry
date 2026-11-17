@@ -2,12 +2,18 @@ import type { OfferReviewStatus } from './shared/photo-shopping-links';
 import type { projectProduct, visibleLists } from './server/access';
 export type Product = NonNullable<ReturnType<typeof projectProduct>> & { contributorName?: string };
 export type GiftList = ReturnType<typeof visibleLists>[number];
+export type SiteRole = 'administrator' | 'collaborator' | 'buyer' | 'guest';
 export type Identity = {
 	id: string;
 	name: string;
 	email: string;
 	member: boolean;
+	siteRole: SiteRole;
+	superAdministrator: boolean;
 	administrator: boolean;
+	collaborator: boolean;
+	buyer: boolean;
+	canCapture: boolean;
 	lists: GiftList[];
 };
 export type ShoppingDraft = OfferReviewStatus & {

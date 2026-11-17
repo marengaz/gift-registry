@@ -12,6 +12,7 @@
 		kind,
 		listId,
 		administrator = false,
+		collaborator = false,
 		children,
 		catalogueStatus
 	}: {
@@ -20,6 +21,7 @@
 		kind: CollectionKind;
 		listId?: string;
 		administrator?: boolean;
+		collaborator?: boolean;
 		children?: Snippet;
 		catalogueStatus?: CatalogueActionStatus;
 	} = $props();
@@ -226,7 +228,7 @@
 		</section>
 	{:else}{@render children?.()}{/if}
 {/snippet}
-{#if kind === 'catalogue' && administrator && catalogueStatus}<CatalogueActions
+{#if kind === 'catalogue' && (administrator || collaborator) && catalogueStatus}<CatalogueActions
 		products={visible.map((row) => row.product)}
 		{lists}
 		status={catalogueStatus}

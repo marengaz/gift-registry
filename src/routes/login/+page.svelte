@@ -35,8 +35,8 @@
 	{:else if data.person}
 		<p>Signed in as {data.person.email}.</p>
 		{#if data.person.member}<a href="/">Open family gifts</a>{:else}<p>
-				Open your invitation link to join the family catalogue. Ask the administrator for an
-				invitation sent to this Google email.
+				You are signed in as a guest. Ask an administrator to grant your permissions or open an
+				invitation link sent to this Google email.
 			</p>{/if}
 	{:else}
 		<p>A family invitation is needed. Use the Google account named in your invitation.</p>

@@ -60,13 +60,25 @@ export const applicationSettings = sqliteTable(
 	},
 	(table) => [check('application_settings_singleton', sql`${table.id} = 1`)]
 );
-export const householdMembers = sqliteTable('household_members', {
-	userId: text('user_id')
-		.primaryKey()
-		.references(() => user.id, { onDelete: 'cascade' }),
-	googleSubject: text('google_subject').notNull().unique(),
-	acceptedAt: integer('accepted_at').notNull()
-});
+export const householdMembers = sqliteTable(
+	'household_members',
+	{
+		userId: text('user_id')
+			.primaryKey()
+			.references(() => user.id, { onDelete: 'cascade' }),
+		googleSubject: text('google_subject').notNull().unique(),
+		acceptedAt: integer('accepted_at').notNull(),
+		role: text('role', { enum: ['administrator', 'collaborator', 'buyer', 'guest'] })
+			.notNull()
+			.default('guest')
+	},
+	(table) => [
+		check(
+			'household_members_role',
+			sql`${table.role} IN ('administrator','collaborator','buyer','guest')`
+		)
+	]
+);
 export const grants = sqliteTable(
 	'grants',
 	{
@@ -83,12 +95,24 @@ export const grants = sqliteTable(
 		check('grants_role', sql`${table.role} IN ('contributor','buyer','viewer')`)
 	]
 );
-export const invitations = sqliteTable('invitations', {
-	id: text('id').primaryKey(),
-	tokenHash: text('token_hash').notNull().unique(),
-	email: text('email').notNull(),
-	grantsJson: text('grants_json').notNull(),
-	expiresAt: integer('expires_at').notNull(),
-	acceptedAt: integer('accepted_at'),
-	createdAt: integer('created_at').notNull()
-});
+export const invitations = sqliteTable(
+	'invitations',
+	{
+		id: text('id').primaryKey(),
+		tokenHash: text('token_hash').notNull().unique(),
+		email: text('email').notNull(),
+		role: text('role', { enum: ['administrator', 'collaborator', 'buyer', 'guest'] })
+			.notNull()
+			.default('guest'),
+		grantsJson: text('grants_json').notNull(),
+		expiresAt: integer('expires_at').notNull(),
+		acceptedAt: integer('accepted_at'),
+		createdAt: integer('created_at').notNull()
+	},
+	(table) => [
+		check(
+			'invitations_role',
+			sql`${table.role} IN ('administrator','collaborator','buyer','guest')`
+		)
+	]
+);

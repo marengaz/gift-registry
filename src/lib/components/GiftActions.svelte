@@ -11,12 +11,14 @@
 	} from '#lib/catalogue-types.ts';
 	let {
 		entry,
+		listId,
 		administrator = false,
 		role,
 		archived = false,
 		compact = false
 	}: {
 		entry: GiftEntry;
+		listId?: string;
 		administrator?: boolean;
 		role?: string | null;
 		archived?: boolean;
@@ -133,6 +135,25 @@
 			busy = false;
 		}
 	}
+	async function removeFromList() {
+		if (!listId || !navigator.onLine || busy || navigating.to) return;
+		busy = true;
+		message = '';
+		try {
+			const response = await fetch(`/api/lists/${listId}/entries/${gift.id}`, {
+				method: 'DELETE'
+			});
+			const result = await response.json();
+			if (!response.ok)
+				throw new Error(result.message ?? 'Could not remove this idea from the list.');
+			await invalidateAll();
+		} catch (error) {
+			message =
+				error instanceof Error ? error.message : 'Could not remove this idea from the list.';
+		} finally {
+			busy = false;
+		}
+	}
 </script>
 
 <div class="gift-actions">
@@ -223,6 +244,12 @@
 						>{/if}
 				{/if}
 			{/if}
+			{#if !archived && gift.state === 'available' && listId && (administrator || role === 'contributor')}<button
+					type="button"
+					class="secondary compact"
+					disabled={!enabled}
+					onclick={removeFromList}>Remove from list</button
+				>{/if}
 			{#if administrator && history.length}<details>
 					<summary>Allocation history</summary>
 					<ol>

@@ -1,6 +1,7 @@
 import type { DatabaseConnection } from './db/client';
 import {
 	AccessError,
+	canCapture,
 	requireAdministrator,
 	requireAuthenticated,
 	visibleLists,
@@ -11,21 +12,34 @@ import {
 	peopleSettings,
 	revokeInvitation,
 	revokeMember,
-	setGrant
+	setGrant,
+	setSiteRole
 } from './invitations';
 import { apiResponse, assertSameOrigin } from './http';
 import { z } from 'zod';
+const siteRole = z.enum(['administrator', 'collaborator', 'buyer', 'guest']);
+const listRole = z.enum(['collaborator', 'contributor', 'buyer', 'viewer']);
 const grant = z.object({
 	listId: z.string().min(1),
-	role: z.enum(['contributor', 'buyer', 'viewer'])
+	role: listRole
 });
 const operation = z.discriminatedUnion('action', [
-	z.object({ action: z.literal('invite'), email: z.email(), grants: z.array(grant) }),
+	z.object({
+		action: z.literal('invite'),
+		email: z.email(),
+		role: siteRole.optional(),
+		grants: z.array(grant)
+	}),
+	z.object({
+		action: z.literal('siteRole'),
+		userId: z.string().min(1),
+		role: siteRole
+	}),
 	z.object({
 		action: z.literal('grant'),
 		userId: z.string().min(1),
 		listId: grant.shape.listId,
-		role: grant.shape.role.nullable()
+		role: listRole.nullable()
 	}),
 	z.object({ action: z.literal('revokeMember'), userId: z.string().min(1) }),
 	z.object({ action: z.literal('revokeInvitation'), id: z.string().min(1) })
@@ -48,6 +62,7 @@ export function peoplePost(connection: DatabaseConnection, event: PeopleEvent) {
 		if (input.action === 'invite') {
 			const result = createInvitation(connection, actor, {
 				email: input.email,
+				role: input.role,
 				grants: input.grants
 			});
 			return {
@@ -56,6 +71,7 @@ export function peoplePost(connection: DatabaseConnection, event: PeopleEvent) {
 				url: new URL(`/invite/${result.token}`, event.url.origin).href
 			};
 		}
+		if (input.action === 'siteRole') setSiteRole(connection, actor, input.userId, input.role);
 		if (input.action === 'grant') setGrant(connection, actor, input.userId, input);
 		if (input.action === 'revokeMember') revokeMember(connection, actor, input.userId);
 		if (input.action === 'revokeInvitation') revokeInvitation(connection, actor, input.id);
@@ -70,7 +86,12 @@ export function ownIdentity(connection: DatabaseConnection, event: PeopleEvent) 
 			name: actor.name,
 			email: actor.email,
 			member: actor.member,
+			siteRole: actor.siteRole,
+			superAdministrator: actor.superAdministrator,
 			administrator: actor.administrator,
+			collaborator: actor.collaborator,
+			buyer: actor.buyer,
+			canCapture: actor.member ? canCapture(connection, actor) : false,
 			lists: actor.member ? visibleLists(connection, actor) : []
 		};
 	});

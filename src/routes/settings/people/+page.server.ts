@@ -7,7 +7,11 @@ export const load: PageServerLoad = ({ locals }) => {
 	const connection = getDatabase();
 	try {
 		const actor = requireAdministrator(connection, locals.actor);
-		return { ...peopleSettings(connection, actor), lists: visibleLists(connection, actor) };
+		return {
+			...peopleSettings(connection, actor),
+			lists: visibleLists(connection, actor),
+			currentUserId: actor.userId
+		};
 	} catch (caught) {
 		if (caught instanceof AccessError) error(caught.status, caught.message);
 		throw caught;

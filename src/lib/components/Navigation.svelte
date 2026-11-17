@@ -12,9 +12,15 @@
 			person = null;
 		}
 	});
+	const canSeeCatalogue = $derived(person?.administrator || person?.collaborator);
 	const contributes = $derived(
 		person?.administrator ||
-			person?.lists.some((list) => !list.archivedAt && list.role === 'contributor')
+			person?.collaborator ||
+			person?.buyer ||
+			person?.canCapture ||
+			person?.lists.some(
+				(list) => !list.archivedAt && (list.role === 'contributor' || list.role === 'buyer')
+			)
 	);
 </script>
 
@@ -24,9 +30,8 @@
 		{#if person?.member}<nav aria-label="Main navigation">
 				<a class:active={page.url.pathname.startsWith('/lists')} href="/lists">Lists</a>
 				<a class:active={page.url.pathname === '/my-gifts'} href="/my-gifts">My gifts</a>
-				{#if person.administrator}<a
-						class:active={page.url.pathname === '/catalogue'}
-						href="/catalogue">Catalogue</a
+				{#if canSeeCatalogue}<a class:active={page.url.pathname === '/catalogue'} href="/catalogue"
+						>Catalogue</a
 					>{/if}
 				{#if contributes}<a class:active={page.url.pathname === '/inbox'} href="/inbox">Inbox</a><a
 						class:active={page.url.pathname === '/capture'}
@@ -43,9 +48,8 @@
 						href="/settings/diagnostics">Server checks</a
 					>{/if}
 			</nav>
-			<div class="account"><span>{person.name}</span><SignOut /></div>{:else}<a
-				class="quiet"
-				href="/login">Sign in</a
-			>{/if}
+			<div class="account"><span>{person.name}</span><SignOut /></div>
+		{:else if person}<div class="account"><span>{person.name}</span><SignOut /></div>
+		{:else}<a class="quiet" href="/login">Sign in</a>{/if}
 	</div>
 </header>

@@ -1,2 +1,4 @@
 import { redirect } from '@sveltejs/kit';
-export const load = () => redirect(303, '/lists');
+import type { PageServerLoad } from './$types';
+export const load: PageServerLoad = ({ locals }) =>
+	redirect(303, locals.actor?.member ? '/lists' : '/login');

@@ -24,7 +24,7 @@
 				<p class="muted">{list.name}</p>
 			</div>
 			<div class="heading-actions">
-				{#if !list.archivedAt && ['administrator', 'contributor'].includes(list.role ?? '')}<a
+				{#if !list.archivedAt && ['administrator', 'contributor', 'buyer'].includes(list.role ?? '')}<a
 						class="button"
 						href={`/capture?list=${list.id}`}>+ Add an idea</a
 					>{/if}{#if controls}<button
@@ -60,7 +60,7 @@
 			<div class="empty-symbol" aria-hidden="true">✧</div>
 			<h2>No ideas to show yet</h2>
 			<p class="muted">
-				{['administrator', 'contributor'].includes(list.role ?? '')
+				{['administrator', 'contributor', 'buyer'].includes(list.role ?? '')
 					? 'Found something they would love? Add a link, photo or a few notes.'
 					: 'Ideas available to you will appear here.'}
 			</p>

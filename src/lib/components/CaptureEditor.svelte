@@ -12,6 +12,7 @@
 		busy = false,
 		editing = false,
 		locked = false,
+		lockedListIds = [],
 		localCapture = false,
 		canSynchronise = true,
 		addingAs = '',
@@ -26,6 +27,7 @@
 		busy?: boolean;
 		editing?: boolean;
 		locked?: boolean;
+		lockedListIds?: string[];
 		localCapture?: boolean;
 		canSynchronise?: boolean;
 		addingAs?: string;
@@ -215,13 +217,14 @@
 			<p class="muted">
 				An idea can be on several lists. Leave these unselected to keep it in your inbox.
 			</p>
-			{#each lists.filter((list) => (!list.archivedAt || draft.listIds.includes(list.id)) && (!listSearch || (list.recipientName + ' ' + list.name + ' ' + (list.occasion ?? ''))
+			{#each lists.filter((list) => (!list.archivedAt || draft.listIds.includes(list.id)) && (['administrator', 'contributor', 'buyer'].includes(list.role ?? '') || draft.listIds.includes(list.id)) && (!listSearch || (list.recipientName + ' ' + list.name + ' ' + (list.occasion ?? ''))
 							.toLowerCase()
 							.includes(listSearch.toLowerCase()))) as list}<div class="list-choice">
 					<label class="check-label"
 						><input
 							type="checkbox"
 							value={list.id}
+							disabled={locked || lockedListIds.includes(list.id)}
 							bind:group={draft.listIds}
 							onchange={onListsChanged}
 						/>
@@ -326,7 +329,7 @@
 				>{editing
 					? 'Changes apply to the shared product.'
 					: localOnly
-						? 'Kept on this device until you’re online and signed in.'
+						? 'Saved locally until you’re online and signed in.'
 						: 'Saves this one idea and its selected lists. A local copy is kept until the server confirms it.'}</span
 			>
 		</div>

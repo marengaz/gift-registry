@@ -11,7 +11,7 @@ import type {
 	CatalogueActionStatus,
 	CatalogueDeleteImpact
 } from '../shared/catalogue-actions';
-import { AccessError, requireAdministrator } from './access';
+import { AccessError, requireCollaborator } from './access';
 import type { CatalogueEvent } from './catalogue';
 import { addProductToList } from './db/catalogue';
 import type { DatabaseConnection } from './db/client';
@@ -281,7 +281,7 @@ export function catalogueActionsGet(connection: DatabaseConnection, event: Catal
 	return actionResponse(() =>
 		connection.sqlite
 			.transaction(() => {
-				const actor = requireAdministrator(connection, event.locals.actor);
+				const actor = requireCollaborator(connection, event.locals.actor);
 				return currentStatus(connection, actor.userId);
 			})
 			.immediate()
@@ -316,7 +316,7 @@ export function catalogueActionsPost(connection: DatabaseConnection, event: Cata
 		);
 		return connection.sqlite
 			.transaction(() => {
-				const actor = requireAdministrator(connection, event.locals.actor);
+				const actor = requireCollaborator(connection, event.locals.actor);
 				const repeated = replay(connection, actor.userId, input.operationId, requestFingerprint);
 				if (repeated) return repeated;
 				const targets = liveProducts(connection, input.productIds);
@@ -418,7 +418,7 @@ export function catalogueActionsUndoPost(connection: DatabaseConnection, event: 
 		});
 		return connection.sqlite
 			.transaction(() => {
-				const actor = requireAdministrator(connection, event.locals.actor);
+				const actor = requireCollaborator(connection, event.locals.actor);
 				const repeated = replay(connection, actor.userId, input.operationId, requestFingerprint);
 				if (repeated) return repeated;
 				const status = currentStatus(connection, actor.userId);

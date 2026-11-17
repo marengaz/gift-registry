@@ -88,6 +88,7 @@
 			</div>{/if}
 		{#if buying && entry}{#key entry.id}<GiftActions
 					{entry}
+					{listId}
 					{compact}
 					{administrator}
 					role={lists.find((list) => list.id === listId)?.role}
