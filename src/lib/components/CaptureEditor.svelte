@@ -338,19 +338,21 @@
 </form>
 
 <style>
-	.capturing .form-actions {
-		position: sticky;
-		bottom: max(0.5rem, env(safe-area-inset-bottom));
-		z-index: 3;
-		background: var(--paper, #fff);
-		padding: 0.8rem;
-		border: 1px solid var(--line);
-		border-radius: 0.65rem;
-		box-shadow: 0 2px 12px #213b4310;
-	}
-	.capturing input,
-	.capturing textarea {
-		scroll-margin-bottom: 10rem;
+	@media (min-width: 601px) and (hover: hover) {
+		.capturing .form-actions {
+			position: sticky;
+			bottom: max(0.5rem, env(safe-area-inset-bottom));
+			z-index: 3;
+			background: var(--paper, #fff);
+			padding: 0.8rem;
+			border: 1px solid var(--line);
+			border-radius: 0.65rem;
+			box-shadow: 0 2px 12px #213b4310;
+		}
+		.capturing input,
+		.capturing textarea {
+			scroll-margin-bottom: 10rem;
+		}
 	}
 	.draft-fields,
 	.list-selection {
