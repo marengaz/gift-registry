@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { nextVersion, validTitle } from '../../scripts/release.mjs';
+import {
+	nextRebuildVersion,
+	nextVersion,
+	resolveReleasePlan,
+	validTitle
+} from '../../scripts/release.mjs';
 
 describe('automatic release policy', () => {
 	it('starts at 0.1.0 and releases maintenance changes as patches', () => {
@@ -23,6 +28,7 @@ describe('automatic release policy', () => {
 	it('rejects malformed versions and empty releases', () => {
 		expect(() => nextVersion('v01.2.3', ['fix: bug'])).toThrow();
 		expect(() => nextVersion('v1.2.3', [])).toThrow();
+		expect(() => nextRebuildVersion('v01.2.3')).toThrow();
 	});
 	it('requires a single-line conventional PR title', () => {
 		expect(validTitle('fix(capture): keep the photograph')).toBe(true);
@@ -30,5 +36,53 @@ describe('automatic release policy', () => {
 		expect(validTitle('update things')).toBe(false);
 		expect(validTitle('fix: valid\nmalicious second line')).toBe(false);
 		expect(validTitle('fix: ')).toBe(false);
+	});
+	it('bumps patch versions for OS rebuilds only when already released', async () => {
+		expect(nextRebuildVersion(null)).toBe('0.1.0');
+		expect(nextRebuildVersion('v0.2.0')).toBe('0.2.1');
+		await expect(
+			resolveReleasePlan({
+				tags: ['v0.1.0', 'v0.2.0'],
+				sameCommitTags: ['v0.2.0'],
+				hasRelease: async () => true,
+				getMessages: () => []
+			})
+		).resolves.toEqual({ publish: false });
+		await expect(
+			resolveReleasePlan({
+				tags: ['v0.1.0', 'v0.2.0'],
+				sameCommitTags: ['v0.2.0'],
+				hasRelease: async () => true,
+				getMessages: () => [],
+				rebuild: true
+			})
+		).resolves.toEqual({ publish: true, version: '0.2.1', tag: 'v0.2.1' });
+		await expect(
+			resolveReleasePlan({
+				tags: ['v0.1.0', 'v0.2.0', 'v0.2.1'],
+				sameCommitTags: ['v0.2.0', 'v0.2.1'],
+				hasRelease: async (tag) => tag === 'v0.2.0' || tag === 'v0.2.1',
+				getMessages: () => [],
+				rebuild: true
+			})
+		).resolves.toEqual({ publish: true, version: '0.2.2', tag: 'v0.2.2' });
+		await expect(
+			resolveReleasePlan({
+				tags: ['v0.1.0', 'v0.2.0', 'v0.2.1'],
+				sameCommitTags: ['v0.2.0', 'v0.2.1'],
+				hasRelease: async (tag) => tag === 'v0.2.0',
+				getMessages: () => [],
+				rebuild: true
+			})
+		).resolves.toEqual({ publish: true, version: '0.2.1', tag: 'v0.2.1' });
+		await expect(
+			resolveReleasePlan({
+				tags: ['v0.1.0', 'v0.2.1'],
+				sameCommitTags: [],
+				hasRelease: async () => true,
+				getMessages: () => ['feat: add wish notes'],
+				rebuild: true
+			})
+		).resolves.toEqual({ publish: true, version: '0.3.0', tag: 'v0.3.0' });
 	});
 });

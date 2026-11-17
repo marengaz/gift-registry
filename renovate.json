@@ -1,0 +1,76 @@
+{
+	"$schema": "https://docs.renovatebot.com/renovate-schema.json",
+	"extends": [
+		"config:recommended",
+		"docker:pinDigests",
+		"helpers:pinGitHubActionDigestsToSemver",
+		":semanticCommits"
+	],
+	"semanticCommitType": "chore",
+	"timezone": "Europe/London",
+	"schedule": ["before 8am on monday"],
+	"prConcurrentLimit": 10,
+	"prHourlyLimit": 0,
+	"minimumReleaseAge": "3 days",
+	"osvVulnerabilityAlerts": true,
+	"vulnerabilityAlerts": {
+		"enabled": true,
+		"groupName": null,
+		"minimumReleaseAge": null,
+		"schedule": [],
+		"semanticCommitType": "fix",
+		"automerge": true
+	},
+	"lockFileMaintenance": {
+		"enabled": true,
+		"schedule": ["before 8am on monday"],
+		"automerge": true
+	},
+	"automerge": true,
+	"automergeType": "pr",
+	"platformAutomerge": true,
+	"rebaseWhen": "behind-base-branch",
+	"customManagers": [
+		{
+			"customType": "regex",
+			"managerFilePatterns": [".github/workflows/*.yml", ".github/workflows/*.yaml"],
+			"matchStrings": ["node-version:\\s*['\"]?(?<currentValue>\\d+\\.\\d+\\.\\d+)['\"]?"],
+			"datasourceTemplate": "node-version",
+			"depNameTemplate": "node"
+		}
+	],
+	"packageRules": [
+		{
+			"description": "Group non-major GitHub Actions updates",
+			"matchManagers": ["github-actions"],
+			"matchUpdateTypes": ["minor", "patch", "digest"],
+			"groupName": "github-actions"
+		},
+		{
+			"description": "Group non-major Docker image updates",
+			"matchManagers": ["dockerfile", "docker-compose"],
+			"matchUpdateTypes": ["minor", "patch", "digest"],
+			"groupName": "docker-images"
+		},
+		{
+			"description": "Group Node runtime patches and minors across Dockerfile and workflows",
+			"matchDepNames": ["node"],
+			"matchUpdateTypes": ["minor", "patch", "digest"],
+			"groupName": "node-runtime"
+		},
+		{
+			"description": "Group non-major npm development dependencies",
+			"matchManagers": ["npm"],
+			"matchDepTypes": ["devDependencies"],
+			"matchUpdateTypes": ["minor", "patch"],
+			"groupName": "npm-dev"
+		},
+		{
+			"description": "Group non-major npm runtime dependencies",
+			"matchManagers": ["npm"],
+			"matchDepTypes": ["dependencies"],
+			"matchUpdateTypes": ["minor", "patch"],
+			"groupName": "npm-prod"
+		}
+	]
+}
