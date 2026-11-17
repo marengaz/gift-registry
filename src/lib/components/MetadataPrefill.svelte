@@ -42,6 +42,7 @@
 	let attemptedPhotoUrl = '';
 	let lastOperation: { fingerprint: string; id: string } | undefined;
 	let controller: AbortController | undefined;
+	let photoController: AbortController | undefined;
 	$effect(() => {
 		const next = draft;
 		untrack(() => {
@@ -49,6 +50,8 @@
 			renderedDraft = next;
 			controller?.abort();
 			controller = undefined;
+			photoController?.abort();
+			photoController = undefined;
 			busy = false;
 			photoBusy = false;
 			message = '';
@@ -76,6 +79,8 @@
 			disposed = true;
 			controller?.abort();
 			controller = undefined;
+			photoController?.abort();
+			photoController = undefined;
 		};
 	});
 	function evidence(candidate: ProductSuggestion) {
@@ -350,8 +355,12 @@
 			photoMessage = 'Go online to copy the shop photo, or add your own.';
 			return;
 		}
+		photoController?.abort();
+		const requestPhotoController = new AbortController();
+		photoController = requestPhotoController;
 		const selectedPhotos = photos;
 		const current = () =>
+			!requestPhotoController.signal.aborted &&
 			!disabled &&
 			draft === requestedDraft &&
 			draft.sourceUrl === capture.sourceUrl &&
@@ -362,7 +371,8 @@
 			const response = await fetch('/api/metadata/image', {
 				method: 'POST',
 				headers: { 'content-type': 'application/json' },
-				body: JSON.stringify({ url })
+				body: JSON.stringify({ url }),
+				signal: AbortSignal.any([requestPhotoController.signal, AbortSignal.timeout(15000)])
 			});
 			if (!response.ok)
 				throw new Error('The shop photo could not be copied. Retry, or add your own photo.');
@@ -377,11 +387,14 @@
 				capture.imageUrl = '';
 			}
 		} catch (error) {
-			if (current())
+			if (current() && !(error instanceof Error && error.name === 'AbortError'))
 				photoMessage =
 					error instanceof Error ? error.message : 'The shop photo could not be copied.';
 		} finally {
-			photoBusy = false;
+			if (photoController === requestPhotoController) {
+				photoController = undefined;
+				photoBusy = false;
+			}
 		}
 	}
 	$effect(() => {

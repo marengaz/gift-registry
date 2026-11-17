@@ -39,7 +39,7 @@
 	let editorReady = $state(true);
 	let baseline = $state(JSON.stringify(emptyDraft()));
 	let baselinePhotos = $state<File[]>([]);
-	let lastRequestedDraft = $state<string | null>(null);
+	let lastRequestedDraft: string | null = null;
 	let openVersion = 0;
 	let requestedListPending = $state<string | null>(null);
 	function applyRequestedList() {
@@ -169,8 +169,8 @@
 			if (localError) return;
 			await unlock();
 			reset();
+			await goto('/capture', { replace: true });
 			lastRequestedDraft = null;
-			await goto('/capture', { replaceState: true });
 			message =
 				'Kept on this device. Choose the idea below to continue it; it will not send until you save.';
 		} catch {
@@ -198,7 +198,7 @@
 			showContinuation = false;
 			markClean();
 			await lock();
-			await goto('/capture?draft=' + encodeURIComponent(merged.id), { replaceState: true });
+			await goto('/capture?draft=' + encodeURIComponent(merged.id), { replace: true });
 			message = 'Screenshot added to this idea. Your link, edits and lists are kept.';
 		} catch (error) {
 			message =
@@ -517,7 +517,7 @@
 			if (page.url.hash.startsWith('#gift=')) {
 				try {
 					const imported = await importBrowserCapture(page.url.hash);
-					await goto(`/capture?draft=${encodeURIComponent(imported.id)}`, { replaceState: true });
+					await goto(`/capture?draft=${encodeURIComponent(imported.id)}`, { replace: true });
 				} catch (error) {
 					browserImportError =
 						error instanceof Error && error.name === 'QuotaExceededError'
@@ -724,8 +724,8 @@
 		await unlock();
 		reset();
 		if (page.url.searchParams.has('draft')) {
+			await goto('/capture', { replace: true });
 			lastRequestedDraft = null;
-			await goto('/capture', { replaceState: true });
 		}
 	}
 	const statusText = (record: LocalDraft) =>

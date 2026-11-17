@@ -271,6 +271,8 @@ test('completes Fill from image on an incoming image/jpg share while local, draf
 
 		await page.getByRole('button', { name: 'Add another', exact: true }).click();
 		await expect(page).toHaveURL(origin + '/capture');
+		await expect(page.getByLabel('Title', { exact: true })).toHaveValue('');
+		await expect(page.getByRole('heading', { name: 'Idea saved', exact: true })).toHaveCount(0);
 		expect(errors).toEqual([]);
 	} finally {
 		await context.close();
@@ -286,12 +288,19 @@ test('supports crop/rotate, text autofill, retailer lookup, undo autofill, and c
 	});
 	await signIn(context, 'admin');
 	const page = await context.newPage();
+	const errors: string[] = [];
+	page.on('pageerror', (error) => errors.push(String(error)));
+
+	let releaseSlowLookup!: () => void;
+	const slowLookupGate = new Promise<void>((resolve) => {
+		releaseSlowLookup = resolve;
+	});
 
 	try {
 		await context.route('**/api/metadata', async (route) => {
 			const payload = route.request().postDataJSON() as { url?: string };
 			if (payload.url?.includes('slow-link')) {
-				await new Promise((resolve) => setTimeout(resolve, 350));
+				await slowLookupGate;
 			}
 			return route.fulfill({
 				json: {
@@ -354,12 +363,18 @@ test('supports crop/rotate, text autofill, retailer lookup, undo autofill, and c
 		await page.getByRole('button', { name: 'Undo autofill', exact: true }).click();
 		await expect(page.getByLabel('Title', { exact: true })).toHaveValue('');
 
-		// Editing link mid-lookup clears "Reading product details…" cleanly
+		// Editing link mid-lookup clears "Reading product details…" cleanly without applying stale details
 		await page.getByLabel('Product link').fill('https://shop.example/slow-link');
 		await page.getByRole('button', { name: 'Look up retailer details', exact: true }).click();
 		await expect(page.getByText('Reading product details…')).toBeVisible();
 		await page.getByLabel('Product link').fill('https://shop.example/changed');
+		await page.getByLabel('Product link').fill('');
+		releaseSlowLookup();
 		await expect(page.getByText('Reading product details…')).toHaveCount(0);
+		await expect(page.getByLabel('Title', { exact: true })).toHaveValue('');
+		await expect(
+			page.getByRole('button', { name: 'Look up retailer details', exact: true })
+		).toBeDisabled();
 
 		// Text autofill
 		await page.getByRole('button', { name: 'Paste text', exact: true }).click();
@@ -390,7 +405,9 @@ test('supports crop/rotate, text autofill, retailer lookup, undo autofill, and c
 		await page.getByRole('button', { name: 'Save idea', exact: true }).click();
 		await expect(page.getByRole('heading', { name: 'Idea saved', exact: true })).toBeVisible();
 		expect(productCount('Cropped Plush Fox')).toBe(1);
+		expect(errors).toEqual([]);
 	} finally {
+		releaseSlowLookup();
 		await context.close();
 	}
 });
