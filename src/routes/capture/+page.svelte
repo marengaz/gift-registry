@@ -496,15 +496,26 @@
 			next(value) {
 				const previousOwner = context?.ownerId;
 				context = value.active;
-				if (initialised && previousOwner !== context?.ownerId) lastRequestedDraft = null;
-				if (initialised && !busy && !formOwner && context?.ownerId && !current && !hasContents()) {
+				const ownerChanged = initialised && previousOwner !== context?.ownerId;
+				if (ownerChanged) lastRequestedDraft = null;
+				const adoptedOwner =
+					initialised && !busy && !formOwner && !!context?.ownerId && !current && !hasContents();
+				if (adoptedOwner) {
 					openVersion++;
 					busy = false;
-					formOwner = context.ownerId;
+					formOwner = context!.ownerId;
 				}
 				applyRequestedList();
 				records = value.own;
 				imports = value.unbound;
+				if (adoptedOwner && ownerChanged) {
+					const requested = page.url.searchParams.get('draft');
+					if (requested && requested !== current?.id) {
+						lastRequestedDraft = requested;
+						void open(requested);
+					}
+					return;
+				}
 				if (initialised && formOwner && formOwner !== context?.ownerId) {
 					void preserveOwner();
 					return;
