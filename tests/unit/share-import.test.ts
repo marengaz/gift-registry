@@ -49,7 +49,12 @@ describe('incoming shares', () => {
 			name: 'Person A',
 			email: 'a@example.test',
 			member: true,
+			siteRole: 'administrator',
+			superAdministrator: true,
 			administrator: true,
+			collaborator: true,
+			buyer: true,
+			canCapture: true,
 			lists: []
 		});
 		const data = form({ title: 'Window display', text: 'A shop photo' });

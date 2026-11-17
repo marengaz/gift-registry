@@ -20,7 +20,12 @@ const person = (id: string): Identity => ({
 	name: id,
 	email: `${id}@example.test`,
 	member: true,
+	siteRole: 'administrator',
+	superAdministrator: true,
 	administrator: true,
+	collaborator: true,
+	buyer: true,
+	canCapture: true,
 	lists: []
 });
 describe('durable capture drafts', () => {

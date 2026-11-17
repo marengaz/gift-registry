@@ -1,9 +1,16 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { fixture } from './identity-fixture';
-import { acceptInvitation, createInvitation, setGrant } from '../../src/lib/server/invitations';
+import {
+	acceptInvitation,
+	createInvitation,
+	setGrant,
+	setSiteRole
+} from '../../src/lib/server/invitations';
 import {
 	canCapture,
+	canEditProduct,
 	eligibleListMembers,
+	listRole,
 	requireMediaAccess,
 	canReadProduct,
 	projectProduct,
@@ -92,5 +99,41 @@ describe('current per-list access projection', () => {
 			.prepare('UPDATE session SET expires_at = 0 WHERE id = ?')
 			.run('session-guest');
 		expect(() => visibleEntries(connection, guest)).toThrow();
+	});
+	it('stacks site-wide buyer with list collaborator grants, exposes eligible members cleanly, and checks canEditProduct', () => {
+		context = fixture();
+		const { connection, admin, actor } = context;
+		setSiteRole(connection, admin, 'guest', 'buyer');
+		setGrant(connection, admin, 'guest', { listId: 'visible', role: 'collaborator' });
+		setSiteRole(connection, admin, 'other', 'collaborator');
+
+		const guest = actor('guest')!;
+		const other = actor('other')!;
+		expect(listRole(connection, guest, 'visible')).toBe('contributor');
+		expect(listRole(connection, guest, 'secret')).toBe('buyer');
+		expect(listRole(connection, guest, 'archived')).toBeNull();
+		expect(canCapture(connection, guest)).toBe(true);
+
+		expect(eligibleListMembers(connection, admin, 'visible')).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ id: 'admin', role: 'contributor' }),
+				expect.objectContaining({ id: 'guest', role: 'contributor' }),
+				expect.objectContaining({ id: 'other', role: 'contributor' })
+			])
+		);
+		expect(eligibleListMembers(connection, admin, 'secret')).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ id: 'admin', role: 'contributor' }),
+				expect.objectContaining({ id: 'guest', role: 'buyer' }),
+				expect.objectContaining({ id: 'other', role: 'contributor' })
+			])
+		);
+
+		connection.sqlite.exec(
+			"INSERT INTO products (id,title,contributor_id) VALUES ('guest-idea','Guest idea','guest'),('admin-idea','Admin idea','admin'); INSERT INTO entries (id,product_id,list_id) VALUES ('ge','guest-idea','secret'),('ae','admin-idea','secret');"
+		);
+		expect(canEditProduct(connection, guest, 'guest-idea')).toBe(true);
+		expect(canEditProduct(connection, guest, 'admin-idea')).toBe(false);
+		expect(canEditProduct(connection, other, 'guest-idea')).toBe(true);
 	});
 });

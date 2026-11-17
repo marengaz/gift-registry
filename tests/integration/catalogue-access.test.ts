@@ -1,10 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import sharp from 'sharp';
 import { fixture } from './identity-fixture';
-import { acceptInvitation, createInvitation, setGrant } from '../../src/lib/server/invitations';
+import {
+	acceptInvitation,
+	createInvitation,
+	setGrant,
+	setSiteRole
+} from '../../src/lib/server/invitations';
 import {
 	productsGet,
 	productGet,
@@ -15,8 +21,14 @@ import {
 	listsPost,
 	recipientsPost,
 	labelsPost,
+	listEntryDelete,
 	type CatalogueEvent
 } from '../../src/lib/server/catalogue';
+import { allocationPost, myGiftsGet } from '../../src/lib/server/allocations';
+import { catalogueActionsGet, catalogueActionsPost } from '../../src/lib/server/catalogue-actions';
+import { listTotalsGet } from '../../src/lib/server/totals';
+import { listDelete, listDeletionImpactGet } from '../../src/lib/server/list-lifecycle';
+import { peopleGet, peoplePost } from '../../src/lib/server/people-api';
 import { mediaGet } from '../../src/lib/server/media';
 let context: ReturnType<typeof fixture>;
 let directory: string;
@@ -107,7 +119,7 @@ describe('catalogue HTTP resource boundaries', () => {
 			).products
 		).toHaveLength(0);
 	});
-	it('saves an own unlisted inbox and independent memberships; denies buyers and viewers', async () => {
+	it('saves an own unlisted inbox and independent memberships for contributors and buyers; denies viewers', async () => {
 		invite('contributor', true);
 		const unlisted = await capture('guest', { listIds: [], estimatePence: null });
 		const shared = await capture('guest', { listIds: ['visible', 'secret'], estimatePence: 1250 });
@@ -119,14 +131,47 @@ describe('catalogue HTTP resource boundaries', () => {
 		).json();
 		expect(inbox.products.map((p: { id: string }) => p.id)).toEqual([unlisted.id]);
 		expect((await productsGet(context.connection, event('guest'))).status).toBe(403);
-		for (const role of ['buyer', 'viewer'] as const) {
-			setGrant(context.connection, context.admin, 'guest', { listId: 'visible', role });
-			setGrant(context.connection, context.admin, 'guest', { listId: 'secret', role });
-			expect(
-				(await productsPost(context.connection, event('guest', { title: 'Denied', listIds: [] })))
-					.status
-			).toBe(403);
-		}
+		setGrant(context.connection, context.admin, 'guest', { listId: 'visible', role: 'buyer' });
+		setGrant(context.connection, context.admin, 'guest', { listId: 'secret', role: 'buyer' });
+		const buyerIdea = await capture('guest', {
+			title: 'Buyer added',
+			listIds: ['visible'],
+			estimatePence: 1500
+		});
+		expect(
+			(
+				await productPatch(
+					context.connection,
+					event('guest', { title: 'Buyer edited', listIds: ['visible', 'secret'] }),
+					buyerIdea.id
+				)
+			).status
+		).toBe(200);
+		expect(
+			(
+				await productPatch(
+					context.connection,
+					event('guest', { title: 'Cannot remove from buyer list', listIds: ['visible'] }),
+					buyerIdea.id
+				)
+			).status
+		).toBe(403);
+		const adminIdea = await capture('admin', { title: 'Admin added', listIds: ['visible'] });
+		expect(
+			(
+				await productPatch(
+					context.connection,
+					event('guest', { title: 'Hijack', listIds: ['visible'] }),
+					adminIdea.id
+				)
+			).status
+		).toBe(403);
+		setGrant(context.connection, context.admin, 'guest', { listId: 'visible', role: 'viewer' });
+		setGrant(context.connection, context.admin, 'guest', { listId: 'secret', role: 'viewer' });
+		expect(
+			(await productsPost(context.connection, event('guest', { title: 'Denied', listIds: [] })))
+				.status
+		).toBe(403);
 	});
 	it('rejects invalid or revoked list submissions atomically and checks request origin', async () => {
 		invite('contributor');
@@ -309,5 +354,224 @@ describe('catalogue HTTP resource boundaries', () => {
 		expect(
 			(await mediaGet(context.connection, event('guest'), id, { mediaRoot: directory })).status
 		).toBe(404);
+	});
+	it('enforces site-wide collaborator, site-wide buyer, stacked list collaborator, and secondary administrator RBAC boundaries', async () => {
+		const adminIdea = await capture('admin', {
+			title: 'Shared toy',
+			listIds: ['visible', 'secret']
+		});
+		const unlistedAdmin = await capture('admin', { title: 'Inbox spark', listIds: [] });
+
+		setSiteRole(context.connection, context.admin, 'guest', 'collaborator');
+		const collabCatalogue = await (await productsGet(context.connection, event('guest'))).json();
+		expect(collabCatalogue.administrator).toBe(false);
+		expect(collabCatalogue.collaborator).toBe(true);
+		expect(collabCatalogue.lists.map((l: { id: string }) => l.id)).not.toContain('archived');
+		expect(collabCatalogue.products.map((p: { id: string }) => p.id)).toContain(adminIdea.id);
+		expect(collabCatalogue.products.map((p: { id: string }) => p.id)).toContain(unlistedAdmin.id);
+		expect((await catalogueActionsGet(context.connection, event('guest'))).status).toBe(200);
+		expect(
+			(
+				await catalogueActionsPost(
+					context.connection,
+					event('guest', {
+						kind: 'add',
+						operationId: randomUUID(),
+						productIds: [unlistedAdmin.id],
+						listIds: ['visible']
+					})
+				)
+			).status
+		).toBe(200);
+		expect(
+			(await labelsPost(context.connection, event('guest', { name: 'Board games' }))).status
+		).toBe(200);
+		expect(
+			(
+				await productPatch(
+					context.connection,
+					event('guest', { title: 'Edited by collab', listIds: ['visible'] }),
+					adminIdea.id
+				)
+			).status
+		).toBe(200);
+		expect(
+			(
+				await listsPost(
+					context.connection,
+					event('guest', { recipientId: 'child', name: 'Blocked' })
+				)
+			).status
+		).toBe(403);
+		expect((await listTotalsGet(context.connection, event('guest'), 'visible')).status).toBe(403);
+		expect((await peopleGet(context.connection, event('guest'))).status).toBe(403);
+		const visibleAdminEntry = adminIdea.entries.find(
+			(e: { listId: string }) => e.listId === 'visible'
+		);
+		expect(
+			(
+				await allocationPost(
+					context.connection,
+					event('guest', {
+						action: 'assign',
+						actionId: randomUUID(),
+						buyerId: 'guest',
+						expectedVersion: 0
+					}),
+					visibleAdminEntry.id
+				)
+			).status
+		).toBe(403);
+
+		setSiteRole(context.connection, context.admin, 'guest', 'buyer');
+		expect((await productsGet(context.connection, event('guest'))).status).toBe(403);
+		await expect(
+			(await listsGet(context.connection, event('guest'))).json()
+		).resolves.toMatchObject({
+			lists: expect.arrayContaining([
+				expect.objectContaining({ id: 'visible', role: 'buyer' }),
+				expect.objectContaining({ id: 'secret', role: 'buyer' })
+			])
+		});
+		const secretEntry = context.connection.sqlite
+			.prepare("SELECT id FROM entries WHERE product_id=? AND list_id='visible'")
+			.get(unlistedAdmin.id) as { id: string };
+		expect(
+			(
+				await allocationPost(
+					context.connection,
+					event('guest', { action: 'reserve', actionId: randomUUID(), expectedVersion: 0 }),
+					secretEntry.id
+				)
+			).status
+		).toBe(200);
+		expect(
+			(
+				await allocationPost(
+					context.connection,
+					event('guest', {
+						action: 'purchase',
+						actionId: randomUUID(),
+						actualPence: 1800,
+						expectedVersion: 1
+					}),
+					secretEntry.id
+				)
+			).status
+		).toBe(200);
+		const myGifts = await (await myGiftsGet(context.connection, event('guest'))).json();
+		expect(myGifts.products.map((p: { id: string }) => p.id)).toContain(unlistedAdmin.id);
+		const ownBuyerIdea = await capture('guest', {
+			title: 'Buyer spark',
+			listIds: ['visible', 'secret']
+		});
+		expect(
+			(
+				await productPatch(
+					context.connection,
+					event('guest', { title: 'Buyer updated', listIds: ['visible', 'secret'] }),
+					ownBuyerIdea.id
+				)
+			).status
+		).toBe(200);
+		expect(
+			(
+				await productPatch(
+					context.connection,
+					event('guest', { title: 'Not yours', listIds: ['visible'] }),
+					adminIdea.id
+				)
+			).status
+		).toBe(403);
+		const visibleOwnEntry = ownBuyerIdea.entries.find(
+			(e: { listId: string }) => e.listId === 'visible'
+		);
+		const secretOwnEntry = ownBuyerIdea.entries.find(
+			(e: { listId: string }) => e.listId === 'secret'
+		);
+		expect(
+			(await listEntryDelete(context.connection, event('guest'), 'visible', visibleOwnEntry.id))
+				.status
+		).toBe(403);
+
+		// Grant site-wide buyer extra list collaborator permission on 'visible'
+		expect(
+			(
+				await peoplePost(
+					context.connection,
+					event('admin', {
+						action: 'grant',
+						userId: 'guest',
+						listId: 'visible',
+						role: 'collaborator'
+					})
+				)
+			).status
+		).toBe(200);
+		const delRes = await listEntryDelete(
+			context.connection,
+			event('guest'),
+			'visible',
+			visibleOwnEntry.id
+		);
+		expect(delRes.status).toBe(200);
+		// Product remains in catalogue even if removed from visible list
+		expect(
+			context.connection.sqlite
+				.prepare('SELECT deleted_at FROM products WHERE id=?')
+				.get(ownBuyerIdea.id)
+		).toEqual({ deleted_at: null });
+		expect(
+			(await listEntryDelete(context.connection, event('guest'), 'secret', secretOwnEntry.id))
+				.status
+		).toBe(403);
+		// Purchased/reserved gift cannot be removed even by collaborator
+		setSiteRole(context.connection, context.admin, 'guest', 'collaborator');
+		expect(
+			(await listEntryDelete(context.connection, event('guest'), 'visible', secretEntry.id)).status
+		).toBe(409);
+
+		// Secondary administrator gets full admin access but cannot alter super admin or self
+		setSiteRole(context.connection, context.admin, 'guest', 'administrator');
+		expect((await listTotalsGet(context.connection, event('guest'), 'visible')).status).toBe(200);
+		expect((await peopleGet(context.connection, event('guest'))).status).toBe(200);
+		expect(
+			(
+				await peoplePost(
+					context.connection,
+					event('guest', { action: 'siteRole', userId: 'admin', role: 'guest' })
+				)
+			).status
+		).toBe(400);
+		expect(
+			(
+				await peoplePost(
+					context.connection,
+					event('guest', { action: 'siteRole', userId: 'guest', role: 'buyer' })
+				)
+			).status
+		).toBe(400);
+		const createdList = await listsPost(
+			context.connection,
+			event('guest', { recipientId: 'child', name: 'Secondary admin list' })
+		);
+		expect(createdList.status).toBe(200);
+		const newList = await createdList.json();
+		const impact = await (
+			await listDeletionImpactGet(context.connection, event('guest'), newList.id)
+		).json();
+		expect(
+			(
+				await listDelete(
+					context.connection,
+					event('guest', {
+						operationId: randomUUID(),
+						deleteOrphans: false,
+						impactFingerprint: impact.fingerprint
+					}),
+					newList.id
+				)
+			).status
+		).toBe(200);
 	});
 });
