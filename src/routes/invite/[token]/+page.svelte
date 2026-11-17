@@ -7,7 +7,7 @@
 <main>
 	<h1>Join family gifts</h1>
 	<p>Accept this invitation as {data.email}.</p>
-	<p>It will add the list permissions chosen by the administrator.</p>
+	<p>It will apply the permissions chosen by the administrator.</p>
 	<form method="POST"><button>Accept invitation</button></form>
 	{#if form?.message}<p role="alert">{form.message}</p>{/if}
 </main>

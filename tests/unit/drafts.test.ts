@@ -20,7 +20,12 @@ const person = (id: string): Identity => ({
 	name: id,
 	email: `${id}@example.test`,
 	member: true,
+	siteRole: 'administrator',
+	superAdministrator: true,
 	administrator: true,
+	collaborator: true,
+	buyer: true,
+	canCapture: true,
 	lists: []
 });
 describe('durable capture drafts', () => {
@@ -553,6 +558,23 @@ describe('account-specific sign-out completion', () => {
 		expect(await db.forgetOwner(observedByOldSignOut!.ownerId)).toBe(false);
 		expect(await db.current()).toEqual(expect.objectContaining({ ownerId: 'b', name: 'b' }));
 		other.close();
+		db.close();
+	});
+	it('allows signed-in non-members and revoked members without an active context to sign out while rejecting mismatched active accounts', async () => {
+		const db = store();
+		await db.remember({
+			...person('guest'),
+			member: false,
+			siteRole: 'guest',
+			administrator: false,
+			collaborator: false,
+			buyer: false,
+			canCapture: false
+		});
+		expect(await db.current()).toBeUndefined();
+		await expect(db.beginSignOut('guest')).resolves.toBeUndefined();
+		await db.remember(person('a'));
+		await expect(db.beginSignOut('guest')).rejects.toThrow(/changed/i);
 		db.close();
 	});
 });

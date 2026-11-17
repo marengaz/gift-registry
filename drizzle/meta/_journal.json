@@ -50,6 +50,13 @@
       "when": 1794693600000,
       "tag": "0006_photo-shopping-links",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1794870000000,
+      "tag": "0007_rbac-permissions",
+      "breakpoints": true
     }
   ]
 }

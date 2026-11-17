@@ -76,7 +76,7 @@ export function filterIdeas(
 		if (detail === 'link' && (product.sourceUrl || product.offers.length)) return [];
 		if (!entries.length)
 			return productMatchesSearch &&
-				(!listId || listId === 'unlisted') &&
+				(!listId || (listId === 'unlisted' && !product.hasHiddenEntries)) &&
 				!status &&
 				!allocation &&
 				(maximum === null || (ideaPrice(row) !== null && ideaPrice(row)! <= maximum)) &&

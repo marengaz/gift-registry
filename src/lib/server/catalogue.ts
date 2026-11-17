@@ -5,8 +5,12 @@ import { z } from 'zod';
 import {
 	AccessError,
 	canCapture,
+	canEditProduct,
+	canReadProduct,
+	listRole,
 	projectProduct,
 	requireAdministrator,
+	requireCollaborator,
 	requireListRole,
 	requireMember,
 	visibleEntries,
@@ -92,7 +96,8 @@ export function parseCapture(input: unknown): CaptureInput {
 function projection(connection: DatabaseConnection, actor: Actor, id: string) {
 	const product = projectProduct(connection, actor, id);
 	if (!product) throw new AccessError(404, 'Idea not found.');
-	const contributorName = actor.administrator
+	const canSeeContributor = actor.administrator || actor.collaborator;
+	const contributorName = canSeeContributor
 		? ((
 				connection.sqlite
 					.prepare('SELECT name FROM user WHERE id=?')
@@ -100,7 +105,7 @@ function projection(connection: DatabaseConnection, actor: Actor, id: string) {
 					{ name: string } | undefined
 			)?.name ?? 'Former member')
 		: undefined;
-	return { ...product, ...(actor.administrator ? { contributorName } : {}) };
+	return { ...product, ...(canSeeContributor ? { contributorName } : {}) };
 }
 function requireCapture(connection: DatabaseConnection, actor: Actor | null) {
 	const current = requireMember(connection, actor);
@@ -115,7 +120,7 @@ function checkTargets(
 	existingIds: string[] = []
 ) {
 	for (const id of new Set(listIds)) {
-		requireListRole(connection, actor, id, ['contributor']);
+		requireListRole(connection, actor, id, ['contributor', 'buyer']);
 		const list = connection.db.select().from(lists).where(eq(lists.id, id)).get();
 		if (!list || list.deletedAt !== null || (list.archivedAt !== null && !existingIds.includes(id)))
 			throw new AccessError(403, 'Choose an active list you can contribute to.');
@@ -183,7 +188,7 @@ export function productsGet(connection: DatabaseConnection, event: CatalogueEven
 	return apiResponse(() => {
 		const actor = requireMember(connection, event.locals.actor);
 		const inbox = event.url.searchParams.get('inbox') === '1';
-		if (!inbox) requireAdministrator(connection, actor);
+		if (!inbox) requireCollaborator(connection, actor);
 		const q = event.url.searchParams.get('q')?.trim().toLocaleLowerCase('en-GB') ?? '';
 		const label = event.url.searchParams.get('label');
 		const unlisted = event.url.searchParams.get('unlisted') === '1';
@@ -194,18 +199,25 @@ export function productsGet(connection: DatabaseConnection, event: CatalogueEven
 			.orderBy(products.createdAt)
 			.all()
 			.reverse()
-			.filter((product) => {
+			.flatMap((product) => {
 				const empty = !connection.sqlite
 					.prepare(
 						'SELECT 1 FROM entries e JOIN lists l ON l.id=e.list_id WHERE e.product_id=? AND l.deleted_at IS NULL'
 					)
 					.get(product.id);
-				return (
-					(!inbox || (empty && (actor.administrator || product.contributorId === actor.userId))) &&
-					(!unlisted || empty)
-				);
+				const include =
+					(!inbox ||
+						(empty &&
+							(actor.administrator ||
+								actor.collaborator ||
+								product.contributorId === actor.userId))) &&
+					(!unlisted || empty);
+				if (!include) return [];
+				const projected = projection(connection, actor, product.id);
+				if (actor.collaborator && !actor.administrator && !empty && projected.entries.length === 0)
+					return [{ ...projected, hasHiddenEntries: true }];
+				return [projected];
 			})
-			.map((product) => projection(connection, actor, product.id))
 			.filter(
 				(product) =>
 					(!label || product.labels.some((l) => l.id === label)) &&
@@ -216,7 +228,10 @@ export function productsGet(connection: DatabaseConnection, event: CatalogueEven
 		return {
 			products: result,
 			lists: visibleLists(connection, actor),
-			labels: actor.administrator ? connection.db.select().from(labels).all() : []
+			labels:
+				actor.administrator || actor.collaborator ? connection.db.select().from(labels).all() : [],
+			administrator: actor.administrator,
+			collaborator: actor.collaborator
 		};
 	});
 }
@@ -255,25 +270,29 @@ export function productsPost(
 export function productPatch(connection: DatabaseConnection, event: CatalogueEvent, id: string) {
 	return apiResponse(async () => {
 		assertSameOrigin(event.request, event.url);
-		const actor = requireAdministrator(connection, event.locals.actor);
+		const actor = requireMember(connection, event.locals.actor);
 		const input = parseCapture(await event.request.json());
 		return connection.sqlite
 			.transaction(() => {
-				projection(connection, actor, id);
-				const existing = connection.db
-					.select({ entry: entries })
-					.from(entries)
-					.innerJoin(lists, eq(entries.listId, lists.id))
-					.where(and(eq(entries.productId, id), isNull(lists.deletedAt)))
-					.all()
-					.map(({ entry }) => entry);
-				checkTargets(
-					connection,
-					actor,
-					input.listIds,
-					existing.map((e) => e.listId)
-				);
+				if (!canEditProduct(connection, actor, id)) {
+					if (actor.administrator || actor.collaborator)
+						throw new AccessError(404, 'Idea not found.');
+					throw new AccessError(
+						403,
+						'Only administrators, collaborators, or the person who added this idea can edit it.'
+					);
+				}
+				const existing = visibleEntries(connection, actor, { productId: id });
+				const existingIds = existing.map((e) => e.listId);
+				const addedListIds = input.listIds.filter((listId) => !existingIds.includes(listId));
+				checkTargets(connection, actor, addedListIds, existingIds);
 				const removed = existing.filter((e) => !input.listIds.includes(e.listId));
+				for (const entry of removed)
+					if (listRole(connection, actor, entry.listId) !== 'contributor')
+						throw new AccessError(
+							403,
+							'List collaborator permission is needed to remove an idea from this list.'
+						);
 				if (removed.some((e) => e.state !== 'available'))
 					throw new AccessError(409, 'Clear the allocation before removing this idea from a list.');
 				connection.db
@@ -304,7 +323,15 @@ export function productPatch(connection: DatabaseConnection, event: CatalogueEve
 								? input.entryEstimates[listId]
 								: (input.estimatePence ?? null)
 					});
-					if (input.entryEstimates && listId in input.entryEstimates)
+					const canEditListEstimate =
+						actor.administrator ||
+						['contributor', 'buyer'].includes(listRole(connection, actor, listId) ?? '');
+					if (
+						input.entryEstimates &&
+						listId in input.entryEstimates &&
+						canEditListEstimate &&
+						(actor.administrator || entry.state === 'available' || entry.buyerId === actor.userId)
+					)
 						connection.db
 							.update(entries)
 							.set({ estimatePence: input.entryEstimates[listId], updatedAt: Date.now() })
@@ -312,7 +339,9 @@ export function productPatch(connection: DatabaseConnection, event: CatalogueEve
 							.run();
 				}
 				setDetails(connection, id, input);
-				return projection(connection, actor, id);
+				return canReadProduct(connection, actor, id)
+					? projection(connection, actor, id)
+					: { id, updated: true };
 			})
 			.immediate();
 	});
@@ -325,6 +354,7 @@ export function listsGet(connection: DatabaseConnection, event: CatalogueEvent, 
 			return {
 				lists: available,
 				administrator: actor.administrator,
+				collaborator: actor.collaborator,
 				...(actor.administrator ? { administratorId: actor.userId } : {}),
 				canCapture: canCapture(connection, actor),
 				recipients: actor.administrator ? connection.db.select().from(recipients).all() : []
@@ -338,7 +368,8 @@ export function listsGet(connection: DatabaseConnection, event: CatalogueEvent, 
 			list,
 			products: productIds.map((productId) => projection(connection, actor, productId)),
 			lists: available,
-			administrator: actor.administrator
+			administrator: actor.administrator,
+			collaborator: actor.collaborator
 		};
 	});
 }
@@ -387,7 +418,7 @@ export function recipientsPost(connection: DatabaseConnection, event: CatalogueE
 export function labelsPost(connection: DatabaseConnection, event: CatalogueEvent) {
 	return apiResponse(async () => {
 		assertSameOrigin(event.request, event.url);
-		requireAdministrator(connection, event.locals.actor);
+		requireCollaborator(connection, event.locals.actor);
 		const parsed = z.object({ name: text }).safeParse(await event.request.json());
 		if (!parsed.success) throw new AccessError(400, 'Enter a label name.');
 		const existing = connection.db
@@ -399,5 +430,50 @@ export function labelsPost(connection: DatabaseConnection, event: CatalogueEvent
 		const value = { id: randomUUID(), name: parsed.data.name };
 		connection.db.insert(labels).values(value).run();
 		return value;
+	});
+}
+export function listEntryDelete(
+	connection: DatabaseConnection,
+	event: CatalogueEvent,
+	listId: string,
+	entryId: string
+) {
+	return apiResponse(() => {
+		assertSameOrigin(event.request, event.url);
+		return connection.sqlite
+			.transaction(() => {
+				const actor = requireListRole(connection, event.locals.actor as Actor, listId, [
+					'contributor'
+				]);
+				const entry = connection.db
+					.select({ entry: entries })
+					.from(entries)
+					.innerJoin(products, eq(entries.productId, products.id))
+					.innerJoin(lists, eq(entries.listId, lists.id))
+					.where(
+						and(
+							eq(entries.id, entryId),
+							eq(entries.listId, listId),
+							isNull(products.deletedAt),
+							isNull(lists.deletedAt)
+						)
+					)
+					.get()?.entry;
+				if (!entry) throw new AccessError(404, 'List item not found.');
+				if (entry.state !== 'available')
+					throw new AccessError(
+						409,
+						actor.administrator || entry.buyerId === actor.userId
+							? 'Clear the allocation before removing this idea from a list.'
+							: 'This gift has changed or is no longer available. Refresh the list.'
+					);
+				connection.db
+					.delete(allocationHistory)
+					.where(eq(allocationHistory.entryId, entry.id))
+					.run();
+				connection.db.delete(entries).where(eq(entries.id, entry.id)).run();
+				return { removed: true, entryId, listId };
+			})
+			.immediate();
 	});
 }

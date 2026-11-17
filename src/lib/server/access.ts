@@ -3,6 +3,7 @@ import { and, eq, isNull } from 'drizzle-orm';
 import type { DatabaseConnection } from './db/client';
 import { entries, lists, media, productLabels, labels, products, recipients } from './db/schema';
 
+export type SiteRole = 'administrator' | 'collaborator' | 'buyer' | 'guest';
 export type ListRole = 'contributor' | 'buyer' | 'viewer';
 export type Actor = {
 	userId: string;
@@ -10,7 +11,11 @@ export type Actor = {
 	googleSubject: string;
 	email: string;
 	name: string;
+	siteRole: SiteRole;
+	superAdministrator: boolean;
 	administrator: boolean;
+	collaborator: boolean;
+	buyer: boolean;
 	member: boolean;
 };
 export type AdministratorIdentity = {
@@ -65,14 +70,28 @@ export function resolveActor(
 					.run(identity.userId, identity.googleSubject);
 				settings = { id: identity.userId, subject: identity.googleSubject };
 			}
-			const administrator =
+			const superAdministrator =
 				settings?.id === identity.userId && settings.subject === identity.googleSubject;
-			const member =
-				administrator ||
-				!!connection.sqlite
-					.prepare('SELECT 1 FROM household_members WHERE user_id=? AND google_subject=?')
-					.get(identity.userId, identity.googleSubject);
-			return { ...identity, sessionId, administrator, member };
+			const membership = connection.sqlite
+				.prepare('SELECT role FROM household_members WHERE user_id=? AND google_subject=?')
+				.get(identity.userId, identity.googleSubject) as { role: SiteRole } | undefined;
+			const siteRole: SiteRole = superAdministrator
+				? 'administrator'
+				: (membership?.role ?? 'guest');
+			const administrator = superAdministrator || siteRole === 'administrator';
+			const collaborator = administrator || siteRole === 'collaborator';
+			const buyer = collaborator || siteRole === 'buyer';
+			const member = superAdministrator || !!membership;
+			return {
+				...identity,
+				sessionId,
+				siteRole,
+				superAdministrator,
+				administrator,
+				collaborator,
+				buyer,
+				member
+			};
 		})
 		.immediate();
 }
@@ -102,6 +121,15 @@ export function requireAdministrator(
 	if (!fresh.administrator) throw new AccessError(403, 'Only the administrator can do this.');
 	return fresh;
 }
+export function requireCollaborator(
+	connection: DatabaseConnection,
+	actor: Actor | null | undefined
+): Actor {
+	const fresh = requireMember(connection, actor);
+	if (!fresh.collaborator)
+		throw new AccessError(403, 'Collaborator or administrator access is needed.');
+	return fresh;
+}
 export function listRole(
 	connection: DatabaseConnection,
 	actor: Actor,
@@ -111,14 +139,15 @@ export function listRole(
 	const list = connection.db.select().from(lists).where(eq(lists.id, listId)).get();
 	if (!list || list.deletedAt !== null || (!fresh.administrator && list.archivedAt !== null))
 		return null;
-	if (fresh.administrator) return 'contributor';
-	return (
+	if (fresh.administrator || fresh.collaborator) return 'contributor';
+	const granted =
 		(
 			connection.sqlite
 				.prepare('SELECT role FROM grants WHERE user_id=? AND list_id=?')
 				.get(fresh.userId, listId) as { role: ListRole } | undefined
-		)?.role ?? null
-	);
+		)?.role ?? null;
+	if (fresh.buyer) return granted === 'contributor' ? 'contributor' : 'buyer';
+	return granted;
 }
 export function requireListRole(
 	connection: DatabaseConnection,
@@ -131,14 +160,16 @@ export function requireListRole(
 		throw new AccessError(403, 'You do not have permission for this list.');
 	return requireMember(connection, actor);
 }
-/** A current contributor grant permits capture, including the author's unlisted inbox. */
+/** A site-wide buyer/collaborator/admin or active contributor/buyer list grant permits capture, including the author's unlisted inbox. */
 export function canCapture(connection: DatabaseConnection, actor: Actor): boolean {
 	const fresh = requireMember(connection, actor);
 	return (
 		fresh.administrator ||
+		fresh.collaborator ||
+		fresh.buyer ||
 		!!connection.sqlite
 			.prepare(
-				`SELECT 1 FROM grants g JOIN lists l ON l.id=g.list_id WHERE g.user_id=? AND g.role='contributor' AND l.archived_at IS NULL AND l.deleted_at IS NULL LIMIT 1`
+				`SELECT 1 FROM grants g JOIN lists l ON l.id=g.list_id WHERE g.user_id=? AND g.role IN ('contributor','buyer') AND l.archived_at IS NULL AND l.deleted_at IS NULL LIMIT 1`
 			)
 			.get(fresh.userId)
 	);
@@ -199,7 +230,7 @@ export function canReadProduct(
 	const fresh = requireMember(connection, actor);
 	const product = connection.db.select().from(products).where(eq(products.id, productId)).get();
 	if (!product || product.deletedAt !== null) return false;
-	if (fresh.administrator) return true;
+	if (fresh.administrator || fresh.collaborator) return true;
 	const memberships = connection.db
 		.select({ entry: entries })
 		.from(entries)
@@ -212,6 +243,43 @@ export function canReadProduct(
 		(entry) =>
 			listRole(connection, fresh, entry.listId) !== null &&
 			(entry.state === 'available' || entry.buyerId === fresh.userId)
+	);
+}
+export function canEditProduct(
+	connection: DatabaseConnection,
+	actor: Actor,
+	productId: string
+): boolean {
+	const fresh = requireMember(connection, actor);
+	if (!canReadProduct(connection, fresh, productId)) return false;
+	if (fresh.administrator || fresh.collaborator) return true;
+	const product = connection.db.select().from(products).where(eq(products.id, productId)).get();
+	return !!product && product.contributorId === fresh.userId && canCapture(connection, fresh);
+}
+export function hasIdentifyRole(
+	connection: DatabaseConnection,
+	actor: Actor,
+	productId: string
+): boolean {
+	const fresh = requireMember(connection, actor);
+	if (fresh.administrator || fresh.collaborator) return true;
+	const product = connection.db.select().from(products).where(eq(products.id, productId)).get();
+	if (product && product.contributorId === fresh.userId && canCapture(connection, fresh))
+		return true;
+	return !!connection.sqlite
+		.prepare(
+			`SELECT 1 FROM entries e JOIN grants g ON g.list_id=e.list_id JOIN lists l ON l.id=e.list_id WHERE e.product_id=? AND g.user_id=? AND g.role='contributor' AND l.archived_at IS NULL AND l.deleted_at IS NULL LIMIT 1`
+		)
+		.get(productId, fresh.userId);
+}
+export function canIdentifyProduct(
+	connection: DatabaseConnection,
+	actor: Actor,
+	productId: string
+): boolean {
+	const fresh = requireMember(connection, actor);
+	return (
+		canReadProduct(connection, fresh, productId) && hasIdentifyRole(connection, fresh, productId)
 	);
 }
 export function requireMediaAccess(connection: DatabaseConnection, actor: Actor, mediaId: string) {
@@ -232,7 +300,7 @@ export function projectProduct(connection: DatabaseConnection, actor: Actor, pro
 	} = product;
 	return {
 		...details,
-		...(fresh.administrator ? { contributorId } : {}),
+		...(fresh.administrator || fresh.collaborator ? { contributorId } : {}),
 		entries: visibleEntries(connection, fresh, { productId }),
 		offers: publicOffers(connection, product),
 		media: connection.db
@@ -256,18 +324,43 @@ export function eligibleListMembers(connection: DatabaseConnection, actor: Actor
 			.get(listId)
 	)
 		return [];
+	const byId = new Map<string, { id: string; name: string; email: string; role: ListRole }>();
+	const superAdmin = connection.sqlite
+		.prepare(
+			`SELECT u.id,u.name,u.email FROM application_settings s JOIN user u ON u.id=s.administrator_id JOIN account a ON a.user_id=u.id AND a.provider_id='google' AND a.account_id=s.administrator_google_subject WHERE s.id=1 AND u.email_verified=1`
+		)
+		.get() as { id: string; name: string; email: string } | undefined;
+	if (superAdmin) byId.set(superAdmin.id, { ...superAdmin, role: 'contributor' });
+	else
+		byId.set(administrator.userId, {
+			id: administrator.userId,
+			name: administrator.name,
+			email: administrator.email,
+			role: 'contributor'
+		});
+	const siteWide = connection.sqlite
+		.prepare(
+			`SELECT u.id,u.name,u.email,m.role AS siteRole FROM household_members m JOIN user u ON u.id=m.user_id JOIN account a ON a.user_id=u.id AND a.provider_id='google' AND a.account_id=m.google_subject WHERE m.role IN ('administrator','collaborator','buyer') AND u.email_verified=1`
+		)
+		.all() as { id: string; name: string; email: string; siteRole: SiteRole }[];
+	for (const person of siteWide)
+		if (!byId.has(person.id))
+			byId.set(person.id, {
+				id: person.id,
+				name: person.name,
+				email: person.email,
+				role: person.siteRole === 'buyer' ? 'buyer' : 'contributor'
+			});
 	const members = connection.sqlite
 		.prepare(
 			`SELECT u.id,u.name,u.email,g.role FROM grants g JOIN household_members m ON m.user_id=g.user_id JOIN user u ON u.id=g.user_id JOIN account a ON a.user_id=u.id AND a.provider_id='google' AND a.account_id=m.google_subject WHERE g.list_id=? AND u.email_verified=1`
 		)
 		.all(listId) as { id: string; name: string; email: string; role: ListRole }[];
-	return [
-		{
-			id: administrator.userId,
-			name: administrator.name,
-			email: administrator.email,
-			role: 'contributor' as const
-		},
-		...members
-	];
+	for (const member of members) {
+		const existing = byId.get(member.id);
+		if (!existing) byId.set(member.id, member);
+		else if (existing.role === 'buyer' && member.role === 'contributor')
+			byId.set(member.id, { ...existing, role: 'contributor' });
+	}
+	return [...byId.values()];
 }

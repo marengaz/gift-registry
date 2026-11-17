@@ -14,5 +14,5 @@ export const load: PageServerLoad = async (event) => {
 		),
 		pageResult(catalogueActionsGet(connection, event))
 	]);
-	return { ...catalogue, administrator: true, catalogueStatus };
+	return { ...catalogue, catalogueStatus };
 };

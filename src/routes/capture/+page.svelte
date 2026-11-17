@@ -8,6 +8,7 @@
 	import DraftPreview from '#lib/components/DraftPreview.svelte';
 	import { emptyDraft, captureTitle } from '#lib/catalogue-types.ts';
 	import {
+		canPersonCapture,
 		draftStore,
 		requestPersistentStorage,
 		type CaptureContext,
@@ -54,9 +55,13 @@
 	}
 	let releaseEditor: (() => Promise<void>) | undefined;
 	let destroyed = false;
+	let signedInNonMember = $state(false);
 	const editorToken = crypto.randomUUID();
 	const lists = $derived(context?.lists ?? []);
-	const allowed = $derived(!context || context.administrator || lists.length > 0);
+	const allowed = $derived(
+		!signedInNonMember &&
+			(!context || context.administrator || !!context.canCapture || lists.length > 0)
+	);
 	const blocked = $derived(changingOwner || (!!formOwner && formOwner !== context?.ownerId));
 	const dirty = $derived(
 		JSON.stringify(draft) !== baseline ||
@@ -146,6 +151,19 @@
 		if (busy || blocked || !hasContents()) return;
 		busy = true;
 		try {
+			if (firstIdentityPending && navigator.onLine && !formOwner) {
+				try {
+					const person = await refreshCaptureIdentity();
+					firstIdentityPending = false;
+					signedInNonMember = !!person && !person.member;
+					if (person?.member && !formOwner && !destroyed) {
+						formOwner = person.id;
+						context = await draftStore.current();
+					}
+				} catch {
+					firstIdentityPending = false;
+				}
+			}
 			await keepLocally(false);
 			if (localError) return;
 			await unlock();
@@ -388,6 +406,7 @@
 		refreshing = true;
 		try {
 			const person = await refreshCaptureIdentity();
+			signedInNonMember = !!person && !person.member;
 			if (firstRefresh && firstIdentityPending) {
 				firstIdentityPending = false;
 				if (
@@ -558,13 +577,9 @@
 			if (navigator.onLine) {
 				const person = await refreshCaptureIdentity();
 				if (!sameForm(version, ownerId)) return;
-				if (
-					!person?.member ||
-					(!person.administrator &&
-						!person.lists.some((list) => !list.archivedAt && list.role === 'contributor'))
-				)
+				if (!person || !canPersonCapture(person))
 					throw new Error(
-						'Sign in with contributor access to save. Your idea remains on this device.'
+						'Sign in with permission to add ideas. Your idea remains on this device.'
 					);
 				if (ownerId && person.id !== ownerId)
 					throw new Error('The account changed. Return to this idea’s author before saving.');
@@ -814,8 +829,7 @@
 	{:else}<section class="panel">
 			<h2>Contributor access needed</h2>
 			<p>
-				Ask the administrator for contributor access to a list. Buyers and viewers can browse the
-				lists shared with them.
+				Ask the administrator for permission to add ideas, or to add you as a buyer or collaborator.
 			</p>
 			<a class="button" href="/lists">View lists</a>
 		</section>{/if}

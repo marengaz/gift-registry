@@ -33,7 +33,12 @@ describe('browser product captures', () => {
 			name: 'Person A',
 			email: 'a@example.test',
 			member: true,
+			siteRole: 'administrator',
+			superAdministrator: true,
 			administrator: true,
+			collaborator: true,
+			buyer: true,
+			canCapture: true,
 			lists: []
 		});
 		const record = await importBrowserCapture(
@@ -59,7 +64,12 @@ describe('browser product captures', () => {
 			name: 'Person A',
 			email: 'a@example.test',
 			member: true,
+			siteRole: 'administrator',
+			superAdministrator: true,
 			administrator: true,
+			collaborator: true,
+			buyer: true,
+			canCapture: true,
 			lists: []
 		});
 		expect(await db.claim(record.id, 'person-a')).toBeUndefined();

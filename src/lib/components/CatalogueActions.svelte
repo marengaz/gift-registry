@@ -195,7 +195,7 @@
 				if (response.status === 401 || response.status === 403) {
 					signInRequired = true;
 					message =
-						'Sign in again as the same administrator, then retry this request to confirm its result.';
+						'Sign in again with the same account, then retry this request to confirm its result.';
 					return;
 				}
 				if (response.status < 500) {

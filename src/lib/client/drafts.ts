@@ -39,9 +39,33 @@ export type CaptureContext = {
 	ownerId: string;
 	name: string;
 	administrator: boolean;
+	canCapture?: boolean;
 	lists: GiftList[];
 	logoutUntil?: number;
 };
+export function canPersonCapture(person: Identity): boolean {
+	return (
+		person.member &&
+		(person.administrator ||
+			person.collaborator ||
+			person.buyer ||
+			person.canCapture ||
+			person.lists.some(
+				(list) => !list.archivedAt && (list.role === 'contributor' || list.role === 'buyer')
+			))
+	);
+}
+export function capturableLists(person: Identity): GiftList[] {
+	return person.lists.filter(
+		(list) =>
+			!list.archivedAt &&
+			(person.administrator ||
+				person.collaborator ||
+				person.buyer ||
+				list.role === 'contributor' ||
+				list.role === 'buyer')
+	);
+}
 const browserLocks = () => (typeof navigator === 'undefined' ? undefined : navigator.locks);
 const editorKey = (database: string, id: string) => `gift-editor:${database}:${id}`;
 const ownerKey = (ownerId: string | null) => ownerId ?? ':unbound';
@@ -192,11 +216,8 @@ export class DraftStore extends Dexie {
 				ownerId: person.id,
 				name: person.name,
 				administrator: person.administrator,
-				lists: copy(
-					person.lists.filter(
-						(list) => !list.archivedAt && (person.administrator || list.role === 'contributor')
-					)
-				),
+				canCapture: canPersonCapture(person),
+				lists: copy(capturableLists(person)),
 				logoutUntil: previous?.ownerId === person.id ? previous.logoutUntil : undefined
 			});
 			return true;
@@ -214,11 +235,7 @@ export class DraftStore extends Dexie {
 		return this.context.get('active');
 	}
 	async adopt(id: string, person: Identity) {
-		if (
-			!person.member ||
-			(!person.administrator &&
-				!person.lists.some((list) => !list.archivedAt && list.role === 'contributor'))
-		)
+		if (!canPersonCapture(person))
 			throw new Error('Current contributor access is needed to adopt this draft.');
 		return this.transaction('rw', this.drafts, async () => {
 			const record = await this.get(id, null);
@@ -262,7 +279,8 @@ export class DraftStore extends Dexie {
 			const active = await this.current();
 			if (
 				expectedOwnerId &&
-				(active?.ownerId !== expectedOwnerId || (!active.administrator && !active.lists.length))
+				(active?.ownerId !== expectedOwnerId ||
+					(!active.administrator && !active.canCapture && !active.lists.length))
 			)
 				throw new Error('The account changed. Reopen the idea with its original account.');
 			if ((active?.logoutUntil ?? 0) > Date.now())
@@ -466,12 +484,12 @@ export class DraftStore extends Dexie {
 	async beginSignOut(ownerId: string) {
 		await this.transaction('rw', this.drafts, this.context, this.identity, async () => {
 			const active = await this.current();
-			if (active?.ownerId !== ownerId)
+			if (active && active.ownerId !== ownerId)
 				throw new Error('The signed-in account changed. Review its drafts before signing out.');
 			if ((await this.list(ownerId)).some((record) => (record.leaseUntil ?? 0) > Date.now()))
 				throw new Error('Synchronisation is still running. Wait before signing out.');
 			await this.beginIdentityRefresh();
-			await this.context.put({ ...active, logoutUntil: Date.now() + 60_000 });
+			if (active) await this.context.put({ ...active, logoutUntil: Date.now() + 60_000 });
 		});
 	}
 	async endSignOut(ownerId: string) {

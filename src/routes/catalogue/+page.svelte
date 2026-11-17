@@ -21,6 +21,7 @@
 		lists={data.lists}
 		kind="catalogue"
 		administrator={data.administrator}
+		collaborator={data.collaborator}
 		catalogueStatus={data.catalogueStatus}
 	>
 		<section class="empty-state">

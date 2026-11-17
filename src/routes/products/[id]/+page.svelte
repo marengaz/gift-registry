@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { invalidateAll } from '$app/navigation';
+	import { goto, invalidateAll } from '$app/navigation';
 	import CaptureEditor from '#lib/components/CaptureEditor.svelte';
 	import ProductSuggestions from '#lib/components/ProductSuggestions.svelte';
 	import PhotoShoppingLinks from '#lib/components/PhotoShoppingLinks.svelte';
@@ -13,10 +13,48 @@
 	import type { PageProps } from './$types';
 	let { data }: PageProps = $props();
 	const product = $derived(data.product as Product);
+	const lockedListIds = $derived(
+		data.administrator || data.collaborator
+			? []
+			: product.entries
+					.filter((entry) => {
+						const role = data.lists.find((item: { id: string }) => item.id === entry.listId)?.role;
+						return role !== 'administrator' && role !== 'contributor';
+					})
+					.map((entry) => entry.listId)
+	);
 	let editing = $state(false);
 	let draft = $state(emptyDraft());
 	let busy = $state(false);
 	let message = $state('');
+	async function removeFromList(listId: string, entryId: string) {
+		busy = true;
+		message = '';
+		try {
+			const response = await fetch(`/api/lists/${listId}/entries/${entryId}`, {
+				method: 'DELETE'
+			});
+			const result = await response.json();
+			if (!response.ok)
+				throw new Error(result.message ?? 'Could not remove this idea from the list.');
+			if (
+				!data.administrator &&
+				!data.collaborator &&
+				!data.canEdit &&
+				product.entries.filter((entry) => entry.id !== entryId).length === 0
+			) {
+				await goto(`/lists/${listId}`);
+				return;
+			}
+			message = 'Removed from list.';
+			await invalidateAll();
+		} catch (error) {
+			message =
+				error instanceof Error ? error.message : 'Could not remove this idea from the list.';
+		} finally {
+			busy = false;
+		}
+	}
 	async function save() {
 		busy = true;
 		message = '';
@@ -29,6 +67,10 @@
 			const result = await response.json();
 			if (!response.ok) throw new Error(result.message);
 			editing = false;
+			if (result.updated && !('entries' in result)) {
+				await goto('/lists');
+				return;
+			}
 			message = 'Changes saved.';
 			await invalidateAll();
 		} catch (error) {
@@ -51,12 +93,12 @@
 <main class:narrow={editing}>
 	<a
 		class="back-link"
-		href={data.administrator
+		href={data.administrator || data.collaborator
 			? '/catalogue'
 			: product.entries[0]
 				? `/lists/${product.entries[0].listId}`
 				: '/inbox'}
-		>← {data.administrator
+		>← {data.administrator || data.collaborator
 			? 'Catalogue'
 			: product.entries[0]
 				? 'Back to list'
@@ -72,7 +114,7 @@
 					<small>Added by {product.contributorName}</small>
 				</p>{/if}
 		</div>
-		{#if data.administrator}<button
+		{#if data.canEdit}<button
 				class="secondary"
 				onclick={() => (editing ? (editing = false) : edit())}
 				>{editing ? 'Cancel editing' : 'Edit idea'}</button
@@ -84,6 +126,7 @@
 			lists={data.lists}
 			{busy}
 			editing
+			{lockedListIds}
 			onSave={save}
 		/>{:else}<div class="details-grid">
 			<div class="photo-gallery">
@@ -110,14 +153,21 @@
 					<h2>On these lists</h2>
 					{#each product.entries as entry}{@const list = data.lists.find(
 							(item: { id: string }) => item.id === entry.listId
-						)}{#if list}<p>
-								<a href={`/lists/${list.id}`}>{list.recipientName} · {list.name}</a><br /><small
-									>{list.occasion ?? 'General ideas'}{list.archivedAt ? ' · Hidden' : ''} · {money(
-										entry.estimatePence
-									)}</small
-								>
+						)}{#if list}<p class="list-membership">
+								<span
+									><a href={`/lists/${list.id}`}>{list.recipientName} · {list.name}</a><br /><small
+										>{list.occasion ?? 'General ideas'}{list.archivedAt ? ' · Hidden' : ''} · {money(
+											entry.estimatePence
+										)}</small
+									></span
+								>{#if !list.archivedAt && entry.state === 'available' && (data.administrator || data.collaborator || list.role === 'contributor')}<button
+										type="button"
+										class="secondary compact"
+										disabled={busy}
+										onclick={() => removeFromList(list.id, entry.id)}>Remove from list</button
+									>{/if}
 							</p>{/if}{:else}<p class="muted">
-							Kept in the unlisted inbox. The administrator can add this to a list.
+							Kept in the unlisted inbox. You or a collaborator can add this to a list later.
 						</p>{/each}
 				</section>
 				{#key product.id}<PhotoShoppingLinks {product} administrator={data.administrator} />{/key}
