@@ -11,7 +11,7 @@ import type {
 	CatalogueActionStatus,
 	CatalogueDeleteImpact
 } from '../shared/catalogue-actions';
-import { AccessError, requireCollaborator } from './access';
+import { AccessError, requireCollaborator, type Actor } from './access';
 import type { CatalogueEvent } from './catalogue';
 import { addProductToList } from './db/catalogue';
 import type { DatabaseConnection } from './db/client';
@@ -236,9 +236,20 @@ function deleteProducts(
 	connection: DatabaseConnection,
 	input: Extract<CatalogueActionRequest, { kind: 'delete' }>,
 	targets: Product[],
-	actionId: string
+	actionId: string,
+	actor: Actor
 ): Snapshots {
 	const affected = targets.flatMap((product) => productEntries(connection, product.id));
+	if (!actor.administrator) {
+		const hasProtected = connection.sqlite.prepare(
+			`SELECT 1 FROM entries e JOIN lists l ON l.id=e.list_id WHERE e.product_id=? AND l.deleted_at IS NULL AND (e.state!='available' OR l.archived_at IS NOT NULL) LIMIT 1`
+		);
+		if (targets.some((product) => hasProtected.get(product.id)))
+			throw new AccessError(
+				409,
+				'This idea cannot be deleted here because it has buying activity or hidden list memberships that only an administrator can review.'
+			);
+	}
 	const nonAvailable = affected
 		.filter((entry) => entry.state !== 'available')
 		.sort((a, b) => a.id.localeCompare(b.id));
@@ -324,7 +335,7 @@ export function catalogueActionsPost(connection: DatabaseConnection, event: Cata
 				const snapshots =
 					input.kind === 'add'
 						? addToLists(connection, input)
-						: deleteProducts(connection, input, targets, actionId);
+						: deleteProducts(connection, input, targets, actionId, actor);
 				const productCount =
 					input.kind === 'delete'
 						? targets.length

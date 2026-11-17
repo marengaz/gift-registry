@@ -256,6 +256,32 @@ export function canEditProduct(
 	const product = connection.db.select().from(products).where(eq(products.id, productId)).get();
 	return !!product && product.contributorId === fresh.userId && canCapture(connection, fresh);
 }
+export function hasIdentifyRole(
+	connection: DatabaseConnection,
+	actor: Actor,
+	productId: string
+): boolean {
+	const fresh = requireMember(connection, actor);
+	if (fresh.administrator || fresh.collaborator) return true;
+	const product = connection.db.select().from(products).where(eq(products.id, productId)).get();
+	if (product && product.contributorId === fresh.userId && canCapture(connection, fresh))
+		return true;
+	return !!connection.sqlite
+		.prepare(
+			`SELECT 1 FROM entries e JOIN grants g ON g.list_id=e.list_id JOIN lists l ON l.id=e.list_id WHERE e.product_id=? AND g.user_id=? AND g.role='contributor' AND l.archived_at IS NULL AND l.deleted_at IS NULL LIMIT 1`
+		)
+		.get(productId, fresh.userId);
+}
+export function canIdentifyProduct(
+	connection: DatabaseConnection,
+	actor: Actor,
+	productId: string
+): boolean {
+	const fresh = requireMember(connection, actor);
+	return (
+		canReadProduct(connection, fresh, productId) && hasIdentifyRole(connection, fresh, productId)
+	);
+}
 export function requireMediaAccess(connection: DatabaseConnection, actor: Actor, mediaId: string) {
 	const image = connection.db.select().from(media).where(eq(media.id, mediaId)).get();
 	if (!image || !canReadProduct(connection, actor, image.productId))

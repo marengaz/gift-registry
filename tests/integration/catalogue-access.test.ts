@@ -29,6 +29,8 @@ import { catalogueActionsGet, catalogueActionsPost } from '../../src/lib/server/
 import { listTotalsGet } from '../../src/lib/server/totals';
 import { listDelete, listDeletionImpactGet } from '../../src/lib/server/list-lifecycle';
 import { peopleGet, peoplePost } from '../../src/lib/server/people-api';
+import { identifyGet, identifyPost } from '../../src/lib/server/enrichment/jobs';
+import { canIdentifyProduct } from '../../src/lib/server/access';
 import { mediaGet } from '../../src/lib/server/media';
 let context: ReturnType<typeof fixture>;
 let directory: string;
@@ -573,5 +575,117 @@ describe('catalogue HTTP resource boundaries', () => {
 				)
 			).status
 		).toBe(200);
+	});
+	it('blocks non-admin collaborators from probing or deleting protected products via catalogueActionsPost, preserves viewer entries on author edits, and scopes identify permissions', async () => {
+		setSiteRole(context.connection, context.admin, 'other', 'buyer');
+		const reserved = await capture('admin', { title: 'Reserved idea', listIds: ['visible'] });
+		const reservedEntryId = reserved.entries[0].id as string;
+		expect(
+			(
+				await allocationPost(
+					context.connection,
+					event('admin', {
+						action: 'assign',
+						actionId: randomUUID(),
+						buyerId: 'other',
+						expectedVersion: 0
+					}),
+					reservedEntryId
+				)
+			).status
+		).toBe(200);
+		context.connection.sqlite.exec(
+			"INSERT INTO lists (id,recipient_id,name,occasion,archived_at) VALUES ('archived','child','Old list','Archived occasion',1); INSERT INTO products (id,title,contributor_id) VALUES ('archived-only','Archived only','admin'); INSERT INTO entries (id,product_id,list_id) VALUES ('archived-entry','archived-only','archived');"
+		);
+
+		setSiteRole(context.connection, context.admin, 'guest', 'collaborator');
+		const catalogueRes = await (await productsGet(context.connection, event('guest'))).json();
+		expect(catalogueRes.products.find((p: { id: string }) => p.id === reserved.id)).toMatchObject({
+			hasHiddenEntries: true,
+			entries: []
+		});
+		expect(
+			catalogueRes.products.find((p: { id: string }) => p.id === 'archived-only')
+		).toMatchObject({ hasHiddenEntries: true, entries: [] });
+		const unlistedRes = await (
+			await productsGet(context.connection, event('guest', undefined, '?unlisted=1'))
+		).json();
+		expect(unlistedRes.products).toHaveLength(0);
+
+		for (const protectedId of [reserved.id, 'archived-only']) {
+			const res = await catalogueActionsPost(
+				context.connection,
+				event('guest', {
+					kind: 'delete',
+					operationId: randomUUID(),
+					productIds: [protectedId]
+				})
+			);
+			expect(res.status).toBe(409);
+			const body = await res.json();
+			expect(body.impact).toBeUndefined();
+			expect(
+				context.connection.sqlite
+					.prepare('SELECT deleted_at FROM products WHERE id=?')
+					.get(protectedId)
+			).toEqual({ deleted_at: null });
+		}
+
+		// Author downgraded to viewer on 'secret' can still save edits while retaining 'secret' untouched
+		setSiteRole(context.connection, context.admin, 'guest', 'guest');
+		setGrant(context.connection, context.admin, 'guest', {
+			listId: 'visible',
+			role: 'contributor'
+		});
+		setGrant(context.connection, context.admin, 'guest', { listId: 'secret', role: 'contributor' });
+		const authored = await capture('guest', {
+			title: 'Author dual-list idea',
+			listIds: ['visible', 'secret'],
+			estimatePence: 2200
+		});
+		setGrant(context.connection, context.admin, 'guest', { listId: 'secret', role: 'viewer' });
+		const patchRes = await productPatch(
+			context.connection,
+			event('guest', {
+				title: 'Author dual-list updated',
+				listIds: ['visible', 'secret'],
+				entryEstimates: { visible: 2500, secret: 9900 }
+			}),
+			authored.id
+		);
+		expect(patchRes.status).toBe(200);
+		const patched = await patchRes.json();
+		expect(patched.title).toBe('Author dual-list updated');
+		expect(
+			patched.entries.find((e: { listId: string }) => e.listId === 'visible')?.estimatePence
+		).toBe(2500);
+		expect(
+			patched.entries.find((e: { listId: string }) => e.listId === 'secret')?.estimatePence
+		).toBe(2200);
+
+		// Buyer-only user cannot trigger identify on admin's product, yet can identify own product
+		const adminSecret = await capture('admin', {
+			title: 'Admin secret idea',
+			sourceUrl: 'https://shop.example/item',
+			listIds: ['secret']
+		});
+		setSiteRole(context.connection, context.admin, 'guest', 'buyer');
+		expect(canIdentifyProduct(context.connection, context.actor('guest')!, adminSecret.id)).toBe(
+			false
+		);
+		expect(canIdentifyProduct(context.connection, context.actor('guest')!, authored.id)).toBe(true);
+		const idGet = await (
+			await identifyGet(context.connection, event('guest'), adminSecret.id)
+		).json();
+		expect(idGet.canIdentify).toBe(false);
+		expect(
+			(
+				await identifyPost(
+					context.connection,
+					event('guest', { operationId: randomUUID(), kind: 'metadata' }),
+					adminSecret.id
+				)
+			).status
+		).toBe(403);
 	});
 });

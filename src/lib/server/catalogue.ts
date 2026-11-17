@@ -199,22 +199,25 @@ export function productsGet(connection: DatabaseConnection, event: CatalogueEven
 			.orderBy(products.createdAt)
 			.all()
 			.reverse()
-			.filter((product) => {
+			.flatMap((product) => {
 				const empty = !connection.sqlite
 					.prepare(
 						'SELECT 1 FROM entries e JOIN lists l ON l.id=e.list_id WHERE e.product_id=? AND l.deleted_at IS NULL'
 					)
 					.get(product.id);
-				return (
+				const include =
 					(!inbox ||
 						(empty &&
 							(actor.administrator ||
 								actor.collaborator ||
 								product.contributorId === actor.userId))) &&
-					(!unlisted || empty)
-				);
+					(!unlisted || empty);
+				if (!include) return [];
+				const projected = projection(connection, actor, product.id);
+				if (actor.collaborator && !actor.administrator && !empty && projected.entries.length === 0)
+					return [{ ...projected, hasHiddenEntries: true }];
+				return [projected];
 			})
-			.map((product) => projection(connection, actor, product.id))
 			.filter(
 				(product) =>
 					(!label || product.labels.some((l) => l.id === label)) &&
@@ -280,12 +283,9 @@ export function productPatch(connection: DatabaseConnection, event: CatalogueEve
 					);
 				}
 				const existing = visibleEntries(connection, actor, { productId: id });
-				checkTargets(
-					connection,
-					actor,
-					input.listIds,
-					existing.map((e) => e.listId)
-				);
+				const existingIds = existing.map((e) => e.listId);
+				const addedListIds = input.listIds.filter((listId) => !existingIds.includes(listId));
+				checkTargets(connection, actor, addedListIds, existingIds);
 				const removed = existing.filter((e) => !input.listIds.includes(e.listId));
 				for (const entry of removed)
 					if (listRole(connection, actor, entry.listId) !== 'contributor')
@@ -323,9 +323,13 @@ export function productPatch(connection: DatabaseConnection, event: CatalogueEve
 								? input.entryEstimates[listId]
 								: (input.estimatePence ?? null)
 					});
+					const canEditListEstimate =
+						actor.administrator ||
+						['contributor', 'buyer'].includes(listRole(connection, actor, listId) ?? '');
 					if (
 						input.entryEstimates &&
 						listId in input.entryEstimates &&
+						canEditListEstimate &&
 						(actor.administrator || entry.state === 'available' || entry.buyerId === actor.userId)
 					)
 						connection.db

@@ -560,4 +560,21 @@ describe('account-specific sign-out completion', () => {
 		other.close();
 		db.close();
 	});
+	it('allows signed-in non-members and revoked members without an active context to sign out while rejecting mismatched active accounts', async () => {
+		const db = store();
+		await db.remember({
+			...person('guest'),
+			member: false,
+			siteRole: 'guest',
+			administrator: false,
+			collaborator: false,
+			buyer: false,
+			canCapture: false
+		});
+		expect(await db.current()).toBeUndefined();
+		await expect(db.beginSignOut('guest')).resolves.toBeUndefined();
+		await db.remember(person('a'));
+		await expect(db.beginSignOut('guest')).rejects.toThrow(/changed/i);
+		db.close();
+	});
 });

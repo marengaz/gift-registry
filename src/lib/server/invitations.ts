@@ -71,6 +71,13 @@ function ensureHouseholdMember(connection: DatabaseConnection, userId: string) {
 		)
 		.run(userId, identity.googleSubject, Date.now());
 }
+function verifiedGoogleUserExists(connection: DatabaseConnection, userId: string): boolean {
+	return !!connection.sqlite
+		.prepare(
+			`SELECT 1 FROM user u JOIN account a ON a.user_id=u.id AND a.provider_id='google' WHERE u.id=? AND u.email_verified=1`
+		)
+		.get(userId);
+}
 function cleanupRedundantGrants(connection: DatabaseConnection, userId: string, role: SiteRole) {
 	if (role === 'administrator' || role === 'collaborator')
 		connection.sqlite.prepare('DELETE FROM grants WHERE user_id=?').run(userId);
@@ -153,14 +160,14 @@ export function setSiteRole(
 	userId: string,
 	role: SiteRole
 ) {
-	const admin = requireAdministrator(connection, actor);
 	const nextRole = validateSiteRole(role);
-	if (userId === superAdministratorId(connection))
-		throw new AccessError(400, 'The super administrator permission cannot be changed.');
-	if (userId === admin.userId && nextRole !== 'administrator')
-		throw new AccessError(400, 'You cannot remove your own administrator access.');
 	connection.sqlite
 		.transaction(() => {
+			const admin = requireAdministrator(connection, actor);
+			if (userId === superAdministratorId(connection))
+				throw new AccessError(400, 'The super administrator permission cannot be changed.');
+			if (userId === admin.userId && nextRole !== 'administrator')
+				throw new AccessError(400, 'You cannot remove your own administrator access.');
 			ensureHouseholdMember(connection, userId);
 			connection.sqlite
 				.prepare('UPDATE household_members SET role=? WHERE user_id=?')
@@ -175,36 +182,50 @@ export function setGrant(
 	userId: string,
 	grant: { listId: string; role: string | null }
 ) {
-	requireAdministrator(connection, actor);
-	if (userId === superAdministratorId(connection))
-		throw new AccessError(400, 'The super administrator already has access to all lists.');
 	connection.sqlite
 		.transaction(() => {
-			ensureHouseholdMember(connection, userId);
-			if (grant.role === null)
+			requireAdministrator(connection, actor);
+			if (userId === superAdministratorId(connection))
+				throw new AccessError(400, 'The super administrator already has access to all lists.');
+			if (grant.role === null) {
+				if (!verifiedGoogleUserExists(connection, userId))
+					throw new AccessError(400, 'Choose a person who has signed in with Google.');
 				connection.sqlite
 					.prepare('DELETE FROM grants WHERE user_id=? AND list_id=?')
 					.run(userId, grant.listId);
-			else {
-				const [validated] = validateGrants(connection, [
-					{ listId: grant.listId, role: grant.role }
-				]);
-				connection.sqlite
-					.prepare(
-						'INSERT INTO grants (user_id,list_id,role) VALUES (?,?,?) ON CONFLICT(user_id,list_id) DO UPDATE SET role=excluded.role'
-					)
-					.run(userId, validated.listId, validated.role);
+				return;
 			}
+			const [validated] = validateGrants(connection, [{ listId: grant.listId, role: grant.role }]);
+			ensureHouseholdMember(connection, userId);
+			const membership = connection.sqlite
+				.prepare('SELECT role FROM household_members WHERE user_id=?')
+				.get(userId) as { role: SiteRole } | undefined;
+			if (membership?.role === 'administrator' || membership?.role === 'collaborator')
+				throw new AccessError(
+					400,
+					'Site-wide collaborators and administrators already have full access to all lists.'
+				);
+			if (membership?.role === 'buyer' && validated.role !== 'contributor')
+				throw new AccessError(
+					400,
+					'Site-wide gift buyers already have buying access to all lists; only list collaborator can be added.'
+				);
+			connection.sqlite
+				.prepare(
+					'INSERT INTO grants (user_id,list_id,role) VALUES (?,?,?) ON CONFLICT(user_id,list_id) DO UPDATE SET role=excluded.role'
+				)
+				.run(userId, validated.listId, validated.role);
 		})
 		.immediate();
 }
 export function revokeMember(connection: DatabaseConnection, actor: Actor, userId: string) {
-	const admin = requireAdministrator(connection, actor);
-	if (userId === superAdministratorId(connection))
-		throw new AccessError(400, 'The super administrator cannot be revoked.');
-	if (userId === admin.userId) throw new AccessError(400, 'You cannot revoke your own membership.');
 	connection.sqlite
 		.transaction(() => {
+			const admin = requireAdministrator(connection, actor);
+			if (userId === superAdministratorId(connection))
+				throw new AccessError(400, 'The super administrator cannot be revoked.');
+			if (userId === admin.userId)
+				throw new AccessError(400, 'You cannot revoke your own membership.');
 			connection.sqlite.prepare('DELETE FROM household_members WHERE user_id=?').run(userId);
 			connection.sqlite.prepare('DELETE FROM session WHERE user_id=?').run(userId);
 			const person = connection.sqlite.prepare('SELECT email FROM user WHERE id=?').get(userId) as

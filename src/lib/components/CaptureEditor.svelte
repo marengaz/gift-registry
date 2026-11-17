@@ -234,7 +234,8 @@
 								>{/if}<small>{list.occasion ?? 'General ideas'}</small></span
 						>
 					</label>
-					{#if editing && draft.listIds.includes(list.id)}<label class="estimate-field"
+					{#if editing && draft.listIds.includes(list.id) && !lockedListIds.includes(list.id) && ['administrator', 'contributor', 'buyer'].includes(list.role ?? '')}<label
+							class="estimate-field"
 							>Estimated price (£)<input
 								inputmode="decimal"
 								bind:value={draft.entryEstimates[list.id]}

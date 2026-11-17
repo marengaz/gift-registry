@@ -62,7 +62,9 @@
 			{#each memberships as membership}{@const list = lists.find(
 					(l) => l.id === membership.listId
 				)}{#if list}<a href={`/lists/${list.id}`}>{list.recipientName} · {list.name}</a
-					>{/if}{:else}<span class="muted">Unlisted idea</span>{/each}
+					>{/if}{:else}<span class="muted"
+					>{product.hasHiddenEntries ? 'Allocated or on a hidden list' : 'Unlisted idea'}</span
+				>{/each}
 		</div>
 		{#if product.contributorName}<p class="attribution">Added by {product.contributorName}</p>{/if}
 		{#if catalogue}<div class="catalogue-card-actions">

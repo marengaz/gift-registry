@@ -484,12 +484,12 @@ export class DraftStore extends Dexie {
 	async beginSignOut(ownerId: string) {
 		await this.transaction('rw', this.drafts, this.context, this.identity, async () => {
 			const active = await this.current();
-			if (active?.ownerId !== ownerId)
+			if (active && active.ownerId !== ownerId)
 				throw new Error('The signed-in account changed. Review its drafts before signing out.');
 			if ((await this.list(ownerId)).some((record) => (record.leaseUntil ?? 0) > Date.now()))
 				throw new Error('Synchronisation is still running. Wait before signing out.');
 			await this.beginIdentityRefresh();
-			await this.context.put({ ...active, logoutUntil: Date.now() + 60_000 });
+			if (active) await this.context.put({ ...active, logoutUntil: Date.now() + 60_000 });
 		});
 	}
 	async endSignOut(ownerId: string) {

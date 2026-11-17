@@ -6,8 +6,9 @@ import { z } from 'zod';
 import sharp from 'sharp';
 import {
 	AccessError,
-	canCapture,
+	canIdentifyProduct,
 	canReadProduct,
+	hasIdentifyRole,
 	requireAdministrator,
 	requireMember,
 	resolveActor,
@@ -47,7 +48,7 @@ function accessible(
 	contributor = false
 ) {
 	const fresh = requireMember(connection, actor);
-	if (contributor && !canCapture(connection, fresh))
+	if (contributor && !hasIdentifyRole(connection, fresh, productId))
 		throw new AccessError(403, 'Contributor permission is needed to identify an idea.');
 	if (!canReadProduct(connection, fresh, productId)) throw new AccessError(404, 'Idea not found.');
 	return fresh;
@@ -207,7 +208,7 @@ export function identifyGet(
 				.all()
 				.filter((job) => job.kind !== 'attachment')
 				.map((job) => publicJob(job, actor)),
-			canIdentify: canCapture(connection, actor),
+			canIdentify: canIdentifyProduct(connection, actor, productId),
 			administrator: actor.administrator,
 			visionConfigured: visionConfiguration().ready,
 			serpapi: serpapiStatus(connection),

@@ -17,6 +17,28 @@ let output = '';
 test.beforeAll(async () => {
 	directory = mkdtempSync(join(tmpdir(), 'gift-rbac-browser-'));
 	const context = fixture();
+	context.connection.sqlite
+		.prepare(
+			'INSERT INTO user (id,name,email,email_verified,created_at,updated_at) VALUES (?,?,?,1,?,?)'
+		)
+		.run('visitor', 'visitor', 'visitor@example.test', Date.now(), Date.now());
+	context.connection.sqlite
+		.prepare(
+			"INSERT INTO account (id,user_id,account_id,provider_id,created_at,updated_at) VALUES (?,?,?,'google',?,?)"
+		)
+		.run('visitor', 'visitor', 'google-visitor', Date.now(), Date.now());
+	context.connection.sqlite
+		.prepare(
+			'INSERT INTO session (id,user_id,token,expires_at,created_at,updated_at) VALUES (?,?,?,?,?,?)'
+		)
+		.run(
+			'session-visitor',
+			'visitor',
+			'token-visitor',
+			Date.now() + 3600000,
+			Date.now(),
+			Date.now()
+		);
 	context.connection.sqlite.exec(
 		"INSERT INTO products(id,title,contributor_id) VALUES('train','Wooden train','admin'),('book','Story book','admin'); INSERT INTO entries(id,product_id,list_id,estimate_pence) VALUES('train-visible','train','visible',2500),('book-secret','book','secret',1400)"
 	);
@@ -93,22 +115,38 @@ test('administers site-wide and per-list RBAC roles and enforces collaborator, g
 		viewport: { width: 1280, height: 900 },
 		extraHTTPHeaders: { 'x-forwarded-proto': 'http' }
 	});
+	const visitor = await browser.newContext({
+		viewport: { width: 1280, height: 900 },
+		extraHTTPHeaders: { 'x-forwarded-proto': 'http' }
+	});
 	try {
 		await Promise.all([
 			signIn(admin, 'admin'),
 			signIn(collaborator, 'other'),
-			signIn(buyer, 'guest')
+			signIn(buyer, 'guest'),
+			signIn(visitor, 'visitor')
 		]);
 		const adminPage = await admin.newPage();
 		const collabPage = await collaborator.newPage();
 		const buyerPage = await buyer.newPage();
+		const visitorPage = await visitor.newPage();
 
-		// 1. Signed-in guest with no grants sees guest landing page and cannot view lists or admin routes
-		await buyerPage.goto(origin + '/');
-		await expect(buyerPage).toHaveURL(origin + '/login');
-		await expect(buyerPage.getByText('You are signed in as a guest.')).toBeVisible();
-		await expect(buyerPage.getByRole('button', { name: 'Sign out' })).toBeVisible();
-		await expect(buyerPage.getByRole('link', { name: 'Lists', exact: true })).toHaveCount(0);
+		// 1. Signed-in guest with no grants sees guest landing page, cannot view capture form, and can sign out cleanly
+		await visitorPage.goto(origin + '/');
+		await expect(visitorPage).toHaveURL(origin + '/login');
+		await expect(visitorPage.getByText('You are signed in as a guest.')).toBeVisible();
+		await expect(visitorPage.getByRole('button', { name: 'Sign out' })).toBeVisible();
+		await expect(visitorPage.getByRole('link', { name: 'Lists', exact: true })).toHaveCount(0);
+
+		await visitorPage.goto(origin + '/capture');
+		await expect(
+			visitorPage.getByRole('heading', { name: 'Contributor access needed', exact: true })
+		).toBeVisible();
+
+		await visitorPage.goto(origin + '/login');
+		await visitorPage.getByRole('button', { name: 'Sign out' }).click();
+		await expect(visitorPage.getByText('Signed in as visitor@example.test.')).toHaveCount(0);
+		await expect(visitorPage.getByRole('button', { name: 'Continue with Google' })).toBeVisible();
 
 		// 2. Super admin promotes `other` -> collaborator and `guest` -> site-wide buyer + list collaborator on Birthday
 		await adminPage.goto(origin + '/settings/people');
@@ -194,7 +232,7 @@ test('administers site-wide and per-list RBAC roles and enforces collaborator, g
 		await buyerPage.getByRole('button', { name: 'Save changes', exact: true }).click();
 		await expect(buyerPage.getByText('Buyer craft kit updated')).toBeVisible();
 
-		// Buyer cannot edit admin's Wooden train, yet with Birthday list collaborator can remove it from Birthday without deleting from catalogue
+		// Buyer cannot edit admin's Wooden train, yet with Birthday list collaborator can remove it from its detail page (redirecting back to list) without deleting from catalogue
 		await buyerPage.goto(origin + '/lists/visible');
 		const trainCard = buyerPage
 			.getByRole('article')
@@ -206,9 +244,8 @@ test('administers site-wide and per-list RBAC roles and enforces collaborator, g
 
 		await buyerPage.goto(origin + '/products/train');
 		await expect(buyerPage.getByRole('button', { name: 'Edit idea', exact: true })).toHaveCount(0);
-
-		await buyerPage.goto(origin + '/lists/visible');
-		await trainCard.getByRole('button', { name: 'Remove from list', exact: true }).click();
+		await buyerPage.getByRole('button', { name: 'Remove from list', exact: true }).click();
+		await expect(buyerPage).toHaveURL(origin + '/lists/visible');
 		await expect(buyerPage.getByRole('heading', { name: 'Wooden train', exact: true })).toHaveCount(
 			0
 		);
@@ -247,6 +284,6 @@ test('administers site-wide and per-list RBAC roles and enforces collaborator, g
 			buyerPage.getByRole('heading', { name: 'Contributor access needed', exact: true })
 		).toBeVisible();
 	} finally {
-		await Promise.all([admin.close(), collaborator.close(), buyer.close()]);
+		await Promise.all([admin.close(), collaborator.close(), buyer.close(), visitor.close()]);
 	}
 });

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { invalidateAll } from '$app/navigation';
+	import { goto, invalidateAll } from '$app/navigation';
 	import CaptureEditor from '#lib/components/CaptureEditor.svelte';
 	import ProductSuggestions from '#lib/components/ProductSuggestions.svelte';
 	import PhotoShoppingLinks from '#lib/components/PhotoShoppingLinks.svelte';
@@ -37,6 +37,15 @@
 			const result = await response.json();
 			if (!response.ok)
 				throw new Error(result.message ?? 'Could not remove this idea from the list.');
+			if (
+				!data.administrator &&
+				!data.collaborator &&
+				!data.canEdit &&
+				product.entries.filter((entry) => entry.id !== entryId).length === 0
+			) {
+				await goto(`/lists/${listId}`);
+				return;
+			}
 			message = 'Removed from list.';
 			await invalidateAll();
 		} catch (error) {
@@ -58,6 +67,10 @@
 			const result = await response.json();
 			if (!response.ok) throw new Error(result.message);
 			editing = false;
+			if (result.updated && !('entries' in result)) {
+				await goto('/lists');
+				return;
+			}
 			message = 'Changes saved.';
 			await invalidateAll();
 		} catch (error) {

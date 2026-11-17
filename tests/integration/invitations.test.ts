@@ -132,4 +132,36 @@ describe('Google invitation boundary', () => {
 		setSiteRole(connection, admin, 'guest', 'collaborator');
 		expect(peopleSettings(connection, admin).grants).toEqual([]);
 	});
+	it('prevents dormant list grants on site-wide roles and does not promote non-members when clearing a grant', () => {
+		context = fixture();
+		const { connection, admin, actor } = context;
+		// Clearing a null grant for a non-member does not promote them to member: true
+		setGrant(connection, admin, 'guest', { listId: 'visible', role: null });
+		expect(actor('guest')).toMatchObject({ member: false, siteRole: 'guest' });
+		expect(() => requireMember(connection, actor('guest'))).toThrow();
+
+		// Site-wide collaborator/admin reject list grants cleanly
+		setSiteRole(connection, admin, 'guest', 'collaborator');
+		expect(() =>
+			setGrant(connection, admin, 'guest', { listId: 'visible', role: 'viewer' })
+		).toThrow();
+		setSiteRole(connection, admin, 'guest', 'administrator');
+		expect(() =>
+			setGrant(connection, admin, 'guest', { listId: 'visible', role: 'contributor' })
+		).toThrow();
+
+		// Site-wide buyer rejects redundant buyer/viewer grants while allowing list collaborator
+		setSiteRole(connection, admin, 'guest', 'buyer');
+		expect(() =>
+			setGrant(connection, admin, 'guest', { listId: 'visible', role: 'buyer' })
+		).toThrow();
+		expect(() =>
+			setGrant(connection, admin, 'guest', { listId: 'visible', role: 'viewer' })
+		).toThrow();
+		setGrant(connection, admin, 'guest', { listId: 'visible', role: 'collaborator' });
+		setSiteRole(connection, admin, 'guest', 'guest');
+		expect(peopleSettings(connection, admin).grants).toEqual([
+			{ userId: 'guest', listId: 'visible', role: 'contributor' }
+		]);
+	});
 });

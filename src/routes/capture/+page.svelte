@@ -55,10 +55,12 @@
 	}
 	let releaseEditor: (() => Promise<void>) | undefined;
 	let destroyed = false;
+	let signedInNonMember = $state(false);
 	const editorToken = crypto.randomUUID();
 	const lists = $derived(context?.lists ?? []);
 	const allowed = $derived(
-		!context || context.administrator || !!context.canCapture || lists.length > 0
+		!signedInNonMember &&
+			(!context || context.administrator || !!context.canCapture || lists.length > 0)
 	);
 	const blocked = $derived(changingOwner || (!!formOwner && formOwner !== context?.ownerId));
 	const dirty = $derived(
@@ -153,6 +155,7 @@
 				try {
 					const person = await refreshCaptureIdentity();
 					firstIdentityPending = false;
+					signedInNonMember = !!person && !person.member;
 					if (person?.member && !formOwner && !destroyed) {
 						formOwner = person.id;
 						context = await draftStore.current();
@@ -403,6 +406,7 @@
 		refreshing = true;
 		try {
 			const person = await refreshCaptureIdentity();
+			signedInNonMember = !!person && !person.member;
 			if (firstRefresh && firstIdentityPending) {
 				firstIdentityPending = false;
 				if (
