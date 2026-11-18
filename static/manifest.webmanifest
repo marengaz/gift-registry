@@ -36,6 +36,7 @@
 					"name": "photos",
 					"accept": [
 						"image/jpeg",
+						"image/jpg",
 						"image/png",
 						"image/webp",
 						"image/avif",

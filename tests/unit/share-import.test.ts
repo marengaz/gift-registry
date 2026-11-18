@@ -76,6 +76,31 @@ describe('incoming shares', () => {
 		expect(await db.list(null)).toEqual([]);
 		db.close();
 	});
+	it('accepts image/jpg and parameterized MIME types from Android share intents', async () => {
+		const db = store();
+		const jpgData = form({ title: 'Camera JPG' });
+		jpgData.append('photos', new File(['jpg bytes'], 'camera-photo', { type: 'IMAGE/JPG' }));
+		const jpgImported = await importShare(jpgData, db);
+		expect(jpgImported.ownerId).toBeNull();
+		expect(await (await db.files(jpgImported.id, null))[0].text()).toBe('jpg bytes');
+
+		const paramData = form({ title: 'Parameterized JPEG' });
+		paramData.append(
+			'photos',
+			new File(['jpeg bytes'], 'gallery.jpeg', { type: 'image/jpeg; charset=binary' })
+		);
+		const paramImported = await importShare(paramData, db);
+		expect(await (await db.files(paramImported.id, null))[0].text()).toBe('jpeg bytes');
+
+		const fallbackData = form({ title: 'Octet stream JPEG' });
+		fallbackData.append(
+			'photos',
+			new File(['octet bytes'], 'IMG_001.JPG', { type: 'application/octet-stream' })
+		);
+		const fallbackImported = await importShare(fallbackData, db);
+		expect(await (await db.files(fallbackImported.id, null))[0].text()).toBe('octet bytes');
+		db.close();
+	});
 	it('does not report a saved import when the local transaction fails', async () => {
 		const db = store();
 		db.blobs.hook('creating', () => {

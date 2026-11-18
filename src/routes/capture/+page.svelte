@@ -39,7 +39,7 @@
 	let editorReady = $state(true);
 	let baseline = $state(JSON.stringify(emptyDraft()));
 	let baselinePhotos = $state<File[]>([]);
-	let lastRequestedDraft = $state<string | null>(null);
+	let lastRequestedDraft: string | null = null;
 	let openVersion = 0;
 	let requestedListPending = $state<string | null>(null);
 	function applyRequestedList() {
@@ -83,6 +83,7 @@
 	async function keepLocally(incomingShare?: boolean) {
 		if (localSaveTask) await localSaveTask;
 		if (blocked || !editorReady || current?.attemptedAt || !hasContents()) return;
+		if (current && !dirty && incomingShare === undefined && releaseEditor) return;
 		const version = openVersion,
 			ownerId = formOwner;
 		const snapshot = JSON.stringify(draft),
@@ -169,6 +170,7 @@
 			await unlock();
 			reset();
 			await goto('/capture', { replace: true });
+			lastRequestedDraft = null;
 			message =
 				'Kept on this device. Choose the idea below to continue it; it will not send until you save.';
 		} catch {
@@ -313,6 +315,8 @@
 			} catch {}
 		}
 		if (changingOwner || !formOwner || formOwner === context?.ownerId) return;
+		const hadUnfinished = !!current || hasContents();
+		let resetSucceeded = false;
 		changingOwner = true;
 		openVersion++;
 		try {
@@ -333,11 +337,19 @@
 			lastRequestedDraft = null;
 			message =
 				'The account changed. Your previous unfinished idea remains on this device under its original account.';
+			resetSucceeded = true;
 		} catch {
 			message =
 				'The account changed and device storage could not preserve the unfinished idea. It is held on this page for its original account. Sign back in as that account and free device storage before saving. Keep this page open.';
 		} finally {
 			changingOwner = false;
+		}
+		if (resetSucceeded && !hadUnfinished && !destroyed) {
+			const requested = page.url.searchParams.get('draft');
+			if (requested && requested !== current?.id) {
+				lastRequestedDraft = requested;
+				void open(requested);
+			}
 		}
 	}
 	async function open(id: string) {
@@ -403,6 +415,7 @@
 		let version = openVersion;
 		let ownerId = formOwner;
 		const firstRefresh = firstIdentityPending;
+		let lockedForSync = false;
 		refreshing = true;
 		try {
 			const person = await refreshCaptureIdentity();
@@ -412,7 +425,6 @@
 				if (
 					person?.member &&
 					!busy &&
-					!current &&
 					!destroyed &&
 					(version === openVersion || formOwner === person.id)
 				) {
@@ -420,33 +432,47 @@
 					if (
 						active?.ownerId === person.id &&
 						!busy &&
-						!current &&
 						!destroyed &&
-						(version === openVersion || formOwner === person.id) &&
-						(!formOwner || formOwner === person.id)
+						(version === openVersion || formOwner === person.id)
 					) {
-						if (!formOwner) {
-							openVersion++;
-							formOwner = person.id;
-							busy = false;
+						if (!current && (!formOwner || formOwner === person.id)) {
+							if (!formOwner) {
+								openVersion++;
+								formOwner = person.id;
+								busy = false;
+							}
+							context = active;
+							version = openVersion;
+							ownerId = formOwner;
+							applyRequestedList();
+						} else if (current && !formOwner) {
+							context = active;
 						}
-						context = active;
-						version = openVersion;
-						ownerId = formOwner;
-						applyRequestedList();
 					}
 				}
 			}
-			if (!person?.member || !sameForm(version, ownerId) || dirty) return;
-			busy = true;
+			if (!person?.member || !sameForm(version, ownerId)) return;
 			const target = current;
+			const shouldLockCurrent =
+				!!target &&
+				target.ownerId === person.id &&
+				target.status !== 'saved' &&
+				target.readyToSync !== false &&
+				target.draft.browserCapture?.pendingReview !== true &&
+				!dirty;
+			if (!shouldLockCurrent) {
+				await syncDrafts(draftStore, fetch, person.id);
+				return;
+			}
+			lockedForSync = true;
+			busy = true;
 			await unlock();
 			if (!sameForm(version, ownerId)) return;
-			await syncDrafts(draftStore, fetch, context?.ownerId);
+			await syncDrafts(draftStore, fetch, person.id);
 			if (!sameForm(version, ownerId)) return;
-			const updated = target ? await draftStore.get(target.id, target.ownerId) : undefined;
+			const updated = await draftStore.get(target.id, target.ownerId);
 			if (!sameForm(version, ownerId)) return;
-			if (target) current = updated;
+			current = updated;
 			await lock();
 		} catch {
 			if (firstRefresh) firstIdentityPending = false;
@@ -454,7 +480,7 @@
 				message = 'You are offline. Save an idea on this device and synchronise when connected.';
 		} finally {
 			refreshing = false;
-			if (sameForm(version, ownerId)) busy = false;
+			if (lockedForSync && sameForm(version, ownerId)) busy = false;
 		}
 	}
 	onMount(() => {
@@ -470,15 +496,26 @@
 			next(value) {
 				const previousOwner = context?.ownerId;
 				context = value.active;
-				if (initialised && previousOwner !== context?.ownerId) lastRequestedDraft = null;
-				if (initialised && !busy && !formOwner && context?.ownerId && !current && !hasContents()) {
+				const ownerChanged = initialised && previousOwner !== context?.ownerId;
+				if (ownerChanged) lastRequestedDraft = null;
+				const adoptedOwner =
+					initialised && !busy && !formOwner && !!context?.ownerId && !current && !hasContents();
+				if (adoptedOwner) {
 					openVersion++;
 					busy = false;
-					formOwner = context.ownerId;
+					formOwner = context!.ownerId;
 				}
 				applyRequestedList();
 				records = value.own;
 				imports = value.unbound;
+				if (adoptedOwner && ownerChanged) {
+					const requested = page.url.searchParams.get('draft');
+					if (requested && requested !== current?.id) {
+						lastRequestedDraft = requested;
+						void open(requested);
+					}
+					return;
+				}
 				if (initialised && formOwner && formOwner !== context?.ownerId) {
 					void preserveOwner();
 					return;
@@ -707,6 +744,10 @@
 			return;
 		await unlock();
 		reset();
+		if (page.url.searchParams.has('draft')) {
+			await goto('/capture', { replace: true });
+			lastRequestedDraft = null;
+		}
 	}
 	const statusText = (record: LocalDraft) =>
 		record.readyToSync === false && !record.attemptedAt

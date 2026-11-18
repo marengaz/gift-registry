@@ -46,8 +46,8 @@
 				await goto(`/lists/${listId}`);
 				return;
 			}
-			message = 'Removed from list.';
 			await invalidateAll();
+			message = 'Removed from list.';
 		} catch (error) {
 			message =
 				error instanceof Error ? error.message : 'Could not remove this idea from the list.';
@@ -71,8 +71,8 @@
 				await goto('/lists');
 				return;
 			}
-			message = 'Changes saved.';
 			await invalidateAll();
+			message = 'Changes saved.';
 		} catch (error) {
 			message =
 				error instanceof Error

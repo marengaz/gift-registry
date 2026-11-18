@@ -42,12 +42,18 @@
 	let attemptedPhotoUrl = '';
 	let lastOperation: { fingerprint: string; id: string } | undefined;
 	let controller: AbortController | undefined;
+	let photoController: AbortController | undefined;
 	$effect(() => {
 		const next = draft;
 		untrack(() => {
 			if (renderedDraft === next) return;
 			renderedDraft = next;
 			controller?.abort();
+			controller = undefined;
+			photoController?.abort();
+			photoController = undefined;
+			busy = false;
+			photoBusy = false;
 			message = '';
 			photoMessage = '';
 			blockedLink = false;
@@ -72,6 +78,9 @@
 		return () => {
 			disposed = true;
 			controller?.abort();
+			controller = undefined;
+			photoController?.abort();
+			photoController = undefined;
 		};
 	});
 	function evidence(candidate: ProductSuggestion) {
@@ -154,25 +163,36 @@
 	async function retrieve(url: string, explicit = false) {
 		if (busy || disabled || !navigator.onLine) return;
 		const requestedDraft = draft;
-		const current = () => !disabled && draft === requestedDraft && draft.sourceUrl === url;
+		const sameTarget = () => draft === requestedDraft && draft.sourceUrl === url;
 		const fingerprint = 'link:' + url + ':' + String(allowAI);
 		if (!lastOperation || lastOperation.fingerprint !== fingerprint || explicit)
 			lastOperation = { fingerprint, id: crypto.randomUUID() };
 		controller?.abort();
-		controller = new AbortController();
+		const requestController = new AbortController();
+		controller = requestController;
+		const active = () => !requestController.signal.aborted && draft === requestedDraft;
+		const canApply = () => active() && sameTarget() && !disabled;
+		const loadingMessage = 'Reading product details…';
 		busy = true;
 		blockedLink = false;
 		choices = [];
 		patch = null;
-		message = 'Reading product details…';
+		message = loadingMessage;
 		try {
 			await ensureLocal?.();
-			if (!current()) return;
-			void fetch('/api/capture-duplicates?url=' + encodeURIComponent(url), { cache: 'no-store' })
+			if (!active()) return;
+			if (!sameTarget() || disabled) {
+				if (message === loadingMessage) message = '';
+				return;
+			}
+			void fetch('/api/capture-duplicates?url=' + encodeURIComponent(url), {
+				cache: 'no-store',
+				signal: requestController.signal
+			})
 				.then(async (response) => {
 					if (!response.ok) return;
 					const result = await response.json();
-					if (current()) {
+					if (canApply()) {
 						duplicates = result.matches ?? [];
 						duplicatesDismissed = false;
 					}
@@ -182,14 +202,22 @@
 				method: 'POST',
 				headers: { 'content-type': 'application/json' },
 				body: JSON.stringify({ url, assist: allowAI, operationId: lastOperation.id }),
-				signal: AbortSignal.any([controller.signal, AbortSignal.timeout(45000)])
+				signal: AbortSignal.any([requestController.signal, AbortSignal.timeout(45000)])
 			});
-			const result = await response.json();
-			if (!current()) return;
-			if (!response.ok) throw new Error(result.message);
-			if (!result.suggestions?.length) {
-				blockedLink = !result.aiUnavailable;
-				message = result.aiUnavailable
+			const result = await response.json().catch(() => null);
+			if (!active()) return;
+			if (!sameTarget() || disabled) {
+				if (message === loadingMessage) message = '';
+				return;
+			}
+			if (!response.ok)
+				throw new Error(
+					result?.message ||
+						"We couldn't read this shop page. Your link is kept; try again or add details yourself."
+				);
+			if (!result?.suggestions?.length) {
+				blockedLink = !result?.aiUnavailable;
+				message = result?.aiUnavailable
 					? result.message
 					: "We couldn't read this shop page. Your link is kept. Add a screenshot showing the product and price, or save the idea as it is.";
 				return;
@@ -200,19 +228,25 @@
 				choices = result.suggestions;
 				message = 'Which item? Choose the product you mean before filling its details.';
 			} else {
-				await useCandidate(result.suggestions[0], current);
-				if (current() && result.aiUnavailable) message += ' ' + result.message;
+				await useCandidate(result.suggestions[0], canApply);
+				if (canApply() && result.aiUnavailable) message += ' ' + result.message;
 			}
 		} catch (error) {
-			if (current()) {
-				blockedLink = true;
-				message =
-					error instanceof Error && error.name !== 'TimeoutError' && error.name !== 'AbortError'
-						? error.message
-						: 'This shop took too long to respond. Your link is kept; retry or add a screenshot.';
+			if (!active()) return;
+			if (!sameTarget() || disabled) {
+				if (message === loadingMessage) message = '';
+				return;
 			}
+			blockedLink = true;
+			message =
+				error instanceof Error && error.name !== 'TimeoutError' && error.name !== 'AbortError'
+					? error.message
+					: 'This shop took too long to respond. Your link is kept; retry or add a screenshot.';
 		} finally {
-			busy = false;
+			if (controller === requestController) {
+				controller = undefined;
+				busy = false;
+			}
 		}
 	}
 	async function fill(kind: 'image' | 'text') {
@@ -227,8 +261,7 @@
 		const requestedDraft = draft,
 			sourceUrl = draft.sourceUrl;
 		let applied = false;
-		const current = () =>
-			!disabled &&
+		const sameTarget = () =>
 			draft === requestedDraft &&
 			draft.sourceUrl === sourceUrl &&
 			(kind === 'image'
@@ -243,14 +276,22 @@
 		if (!lastOperation || lastOperation.fingerprint !== fingerprint)
 			lastOperation = { fingerprint, id: crypto.randomUUID() };
 		controller?.abort();
-		controller = new AbortController();
+		const requestController = new AbortController();
+		controller = requestController;
+		const active = () => !requestController.signal.aborted && draft === requestedDraft;
+		const canApply = () => active() && sameTarget() && !disabled;
+		const loadingMessage = 'Reading the supplied ' + kind + '…';
 		busy = true;
 		choices = [];
 		patch = null;
-		message = 'Reading the supplied ' + kind + '…';
+		message = loadingMessage;
 		try {
 			await ensureLocal?.();
-			if (!current()) return;
+			if (!active()) return;
+			if (!sameTarget() || disabled) {
+				if (message === loadingMessage) message = '';
+				return;
+			}
 			const body = new FormData();
 			body.set('operationId', lastOperation.id);
 			body.set('kind', kind);
@@ -260,32 +301,48 @@
 			const response = await fetch('/api/capture-details', {
 				method: 'POST',
 				body,
-				signal: AbortSignal.any([controller.signal, AbortSignal.timeout(45000)])
+				signal: AbortSignal.any([requestController.signal, AbortSignal.timeout(45000)])
 			});
-			const result = await response.json();
-			if (!current()) return;
-			if (!response.ok) throw new Error(result.message);
-			if (result.failure) lastOperation = undefined;
-			if (result.ambiguity || result.suggestions?.length > 1) {
+			const result = await response.json().catch(() => null);
+			if (!active()) return;
+			if (!sameTarget() || disabled) {
+				if (message === loadingMessage) message = '';
+				return;
+			}
+			if (!response.ok)
+				throw new Error(
+					result?.message ||
+						'The details could not be read reliably. Your idea is safe; add anything you know or save it as it is.'
+				);
+			if (result?.failure) lastOperation = undefined;
+			if (result?.ambiguity || result?.suggestions?.length > 1) {
 				choicesDraft = draft;
 				choicesSource = draft.sourceUrl;
 				choices = result.suggestions ?? [];
 				message =
 					'More than one item or price is visible. Crop the image to one product and try again, or choose an item below.';
-			} else if (result.suggestions?.length) {
+			} else if (result?.suggestions?.length) {
 				applied = true;
-				await useCandidate(result.suggestions[0], current);
+				await useCandidate(result.suggestions[0], canApply);
 			} else
 				message =
-					result.message || 'No reliable details were found. Keep what you know and save the idea.';
+					result?.message ||
+					'No reliable details were found. Keep what you know and save the idea.';
 		} catch (error) {
-			if (current())
-				message =
-					error instanceof Error && error.name !== 'TimeoutError'
-						? error.message
-						: 'Reading details took too long. Keep this idea and try again later.';
+			if (!active()) return;
+			if (!sameTarget() || disabled) {
+				if (message === loadingMessage) message = '';
+				return;
+			}
+			message =
+				error instanceof Error && error.name !== 'TimeoutError' && error.name !== 'AbortError'
+					? error.message
+					: 'Reading details took too long. Keep this idea and try again later.';
 		} finally {
-			busy = false;
+			if (controller === requestController) {
+				controller = undefined;
+				busy = false;
+			}
 		}
 	}
 	async function importBrowserPhoto() {
@@ -298,8 +355,12 @@
 			photoMessage = 'Go online to copy the shop photo, or add your own.';
 			return;
 		}
+		photoController?.abort();
+		const requestPhotoController = new AbortController();
+		photoController = requestPhotoController;
 		const selectedPhotos = photos;
 		const current = () =>
+			!requestPhotoController.signal.aborted &&
 			!disabled &&
 			draft === requestedDraft &&
 			draft.sourceUrl === capture.sourceUrl &&
@@ -310,7 +371,8 @@
 			const response = await fetch('/api/metadata/image', {
 				method: 'POST',
 				headers: { 'content-type': 'application/json' },
-				body: JSON.stringify({ url })
+				body: JSON.stringify({ url }),
+				signal: AbortSignal.any([requestPhotoController.signal, AbortSignal.timeout(15000)])
 			});
 			if (!response.ok)
 				throw new Error('The shop photo could not be copied. Retry, or add your own photo.');
@@ -325,11 +387,14 @@
 				capture.imageUrl = '';
 			}
 		} catch (error) {
-			if (current())
+			if (current() && !(error instanceof Error && error.name === 'AbortError'))
 				photoMessage =
 					error instanceof Error ? error.message : 'The shop photo could not be copied.';
 		} finally {
-			photoBusy = false;
+			if (photoController === requestPhotoController) {
+				photoController = undefined;
+				photoBusy = false;
+			}
 		}
 	}
 	$effect(() => {
