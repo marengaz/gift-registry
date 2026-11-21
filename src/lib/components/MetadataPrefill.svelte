@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount, untrack } from 'svelte';
+	import { onMount, untrack, type Snippet } from 'svelte';
 	import type { CaptureDraft } from '#lib/catalogue-types.ts';
 	import {
 		applySuggestion,
@@ -11,12 +11,16 @@
 		draft = $bindable(),
 		photos = $bindable([]),
 		disabled = false,
-		ensureLocal
+		ensureLocal,
+		linkActions,
+		children
 	}: {
 		draft: CaptureDraft;
 		photos?: File[];
 		disabled?: boolean;
 		ensureLocal?: () => Promise<void>;
+		linkActions?: Snippet;
+		children?: Snippet;
 	} = $props();
 	let message = $state('');
 	let busy = $state(false);
@@ -26,6 +30,7 @@
 	let allowAI = $state(true);
 	let ai = $state({ configured: false, enabled: false });
 	let selectedImage = $state(0);
+	let feedbackArea = $state<'link' | 'image'>('link');
 	let choices = $state<ProductSuggestion[]>([]);
 	let duplicates = $state<{ id: string; title: string }[]>([]);
 	let duplicatesDismissed = $state(false);
@@ -43,6 +48,17 @@
 	let lastOperation: { fingerprint: string; id: string } | undefined;
 	let controller: AbortController | undefined;
 	let photoController: AbortController | undefined;
+	const hasUndo = $derived(!!patch && patchDraft === draft);
+	const hasChoices = $derived(
+		!!choices.length && choicesDraft === draft && choicesSource === draft.sourceUrl
+	);
+	const showPhotoSection = $derived(
+		!!photos.length ||
+			photoBusy ||
+			!!photoMessage ||
+			(!!draft.browserCapture?.imageUrl && !photos.length) ||
+			(feedbackArea === 'image' && (!!message || hasUndo || hasChoices))
+	);
 	$effect(() => {
 		const next = draft;
 		untrack(() => {
@@ -57,6 +73,7 @@
 			message = '';
 			photoMessage = '';
 			blockedLink = false;
+			feedbackArea = 'link';
 			choices = [];
 			duplicates = [];
 			duplicatesDismissed = false;
@@ -175,6 +192,7 @@
 		const loadingMessage = 'Reading product details…';
 		busy = true;
 		blockedLink = false;
+		feedbackArea = 'link';
 		choices = [];
 		patch = null;
 		message = loadingMessage;
@@ -252,6 +270,7 @@
 	async function fill(kind: 'image' | 'text') {
 		if (busy || disabled) return;
 		if (!navigator.onLine) {
+			feedbackArea = kind === 'image' ? 'image' : 'link';
 			message = 'Go online to fill details. Your idea can still be kept on this device.';
 			return;
 		}
@@ -282,6 +301,7 @@
 		const canApply = () => active() && sameTarget() && !disabled;
 		const loadingMessage = 'Reading the supplied ' + kind + '…';
 		busy = true;
+		feedbackArea = kind === 'image' ? 'image' : 'link';
 		choices = [];
 		patch = null;
 		message = loadingMessage;
@@ -440,6 +460,22 @@
 	});
 </script>
 
+{#snippet choicePicker()}
+	<fieldset>
+		<legend>Which item?</legend>{#each choices as candidate}<button
+				type="button"
+				class="secondary"
+				{disabled}
+				onclick={() => {
+					void useCandidate(
+						candidate,
+						() => !disabled && draft === choicesDraft && draft.sourceUrl === choicesSource
+					);
+				}}>Use {candidate.title ?? 'this item'}</button
+			>{/each}
+	</fieldset>
+{/snippet}
+
 <div class="metadata-help">
 	{#if duplicates.length && !duplicatesDismissed}<div class="notice">
 			<p>This idea may already be saved.</p>
@@ -456,15 +492,12 @@
 			>
 		</div>{/if}
 	<label class="check-label ai-option"
-		><input type="checkbox" bind:checked={allowAI} /><span>Use AI for missing page details</span
+		><input type="checkbox" bind:checked={allowAI} /><span>Use AI for missing link details</span
 		></label
 	>
-	<small
-		>Product content may be sent to Google. Images are sent only when you choose Fill from image.</small
-	>
+	<small>Sends page content to Google when link details are missing.</small>
 	{#if ai.configured && !ai.enabled}<p class="muted">
-			AI help is disabled. The administrator can enable it in Identification settings. You can still
-			save ideas.
+			AI help is off in Identification settings. You can still save ideas.
 		</p>{/if}
 	<div class="source-actions">
 		<button
@@ -474,35 +507,21 @@
 			onclick={() => retrieve(draft.sourceUrl, true)}
 			>{busy ? 'Reading source…' : 'Look up retailer details'}</button
 		>
-		{#if photos.length}
-			{#if photos.length > 1}<label
-					>Image to read<select bind:value={selectedImage}
-						>{#each photos as photo, index}<option value={index}>{photo.name}</option
-							>{/each}</select
-					></label
-				>{/if}
-			<button
-				type="button"
-				class="secondary"
-				disabled={disabled || busy}
-				onclick={() => fill('image')}>Fill from image</button
-			>
-		{/if}
+		{@render linkActions?.()}
 		{#if draft.sourceText.trim()}<button
 				type="button"
 				class="quiet"
 				disabled={disabled || busy}
 				onclick={() => fill('text')}>Fill from text</button
 			>{/if}
-		{#if patch && patchDraft === draft}<button type="button" class="quiet" {disabled} onclick={undo}
-				>Undo autofill</button
+		{#if hasUndo && feedbackArea === 'link'}<button
+				type="button"
+				class="quiet"
+				{disabled}
+				onclick={undo}>Undo autofill</button
 			>{/if}
 	</div>
-	{#if photos.length}<p class="muted">
-			Preview or crop your image before filling details. Only the image you submit will be sent to
-			Google.
-		</p>{/if}
-	{#if message}<p class="muted" role="status">{message}</p>{/if}
+	{#if feedbackArea === 'link' && message}<p class="muted" role="status">{message}</p>{/if}
 	{#if blockedLink}<div class="source-actions">
 			<label class="button secondary"
 				>Add screenshot<input
@@ -528,32 +547,53 @@
 					rel="noopener noreferrer">Open product page</a
 				>{/if}
 		</div>{/if}
-	{#if choices.length && choicesDraft === draft && choicesSource === draft.sourceUrl}<fieldset>
-			<legend>Which item?</legend>{#each choices as candidate}<button
-					type="button"
-					class="secondary"
-					{disabled}
-					onclick={() => {
-						void useCandidate(
-							candidate,
-							() => !disabled && draft === choicesDraft && draft.sourceUrl === choicesSource
-						);
-					}}>Use {candidate.title ?? 'this item'}</button
-				>{/each}
-		</fieldset>{/if}
-	{#if photoBusy}<p role="status" class="muted">Copying shop photo…</p>{/if}
-	{#if photoMessage}<p role="status" class="muted">{photoMessage}</p>{/if}
-	{#if draft.browserCapture?.imageUrl && !photos.length}<button
-			type="button"
-			class="quiet"
-			disabled={disabled || photoBusy}
-			onclick={importBrowserPhoto}>Retry shop photo</button
-		>{/if}
+	{#if feedbackArea === 'link' && hasChoices}{@render choicePicker()}{/if}
 </div>
 
+{@render children?.()}
+
+{#if showPhotoSection}
+	<div class="photo-prefill">
+		{#if photos.length || (hasUndo && feedbackArea === 'image')}<div class="source-actions">
+				{#if photos.length > 1}<label
+						>Image to read<select bind:value={selectedImage}
+							>{#each photos as photo, index}<option value={index}>{photo.name}</option
+								>{/each}</select
+						></label
+					>{/if}
+				{#if photos.length}<button
+						type="button"
+						class="secondary"
+						disabled={disabled || busy}
+						onclick={() => fill('image')}>Fill from image</button
+					>{/if}
+				{#if hasUndo && feedbackArea === 'image'}<button
+						type="button"
+						class="quiet"
+						{disabled}
+						onclick={undo}>Undo autofill</button
+					>{/if}
+			</div>{/if}
+		{#if photos.length}<small
+				>Sends only the selected image to Google. Crop above first if needed.</small
+			>{/if}
+		{#if feedbackArea === 'image' && message}<p class="muted" role="status">{message}</p>{/if}
+		{#if feedbackArea === 'image' && hasChoices}{@render choicePicker()}{/if}
+		{#if photoBusy}<p role="status" class="muted">Copying shop photo…</p>{/if}
+		{#if photoMessage}<p role="status" class="muted">{photoMessage}</p>{/if}
+		{#if draft.browserCapture?.imageUrl && !photos.length}<button
+				type="button"
+				class="quiet"
+				disabled={disabled || photoBusy}
+				onclick={importBrowserPhoto}>Retry shop photo</button
+			>{/if}
+	</div>
+{/if}
+
 <style>
-	.metadata-help {
-		margin: 0.75rem 0 1rem;
+	.metadata-help,
+	.photo-prefill {
+		margin: 0.5rem 0 1rem;
 	}
 	.source-actions {
 		display: flex;
@@ -562,11 +602,16 @@
 		gap: 0.6rem;
 		margin-top: 0.6rem;
 	}
+	.photo-prefill .source-actions {
+		margin-top: 0;
+		margin-bottom: 0.35rem;
+	}
 	.ai-option {
 		font-size: 0.85rem;
-		margin-bottom: 0.3rem;
+		margin: 0 0 0.2rem;
 	}
 	small {
+		display: block;
 		color: var(--muted);
 	}
 	fieldset {

@@ -292,7 +292,17 @@ test('crops a screenshot locally, fills on request and preserves deliberate edit
 			fullPage: true
 		});
 		expect(imageRequests).toBe(0);
-		await page.getByRole('button', { name: 'Fill from image', exact: true }).click();
+		const fillFromImage = page.getByRole('button', { name: 'Fill from image', exact: true });
+		const photosInput = page.getByLabel('Photos', { exact: false });
+		const photosBox = await photosInput.boundingBox();
+		const fillBox = await fillFromImage.boundingBox();
+		expect(photosBox).not.toBeNull();
+		expect(fillBox).not.toBeNull();
+		expect(fillBox!.y).toBeGreaterThan(photosBox!.y);
+		await expect(
+			page.getByText('Sends only the selected image to Google.', { exact: false })
+		).toBeVisible();
+		await fillFromImage.click();
 		await expect(page.getByLabel('Estimated price (£)', { exact: true })).toHaveValue('42.00');
 		await expect(page.getByLabel('Title', { exact: true })).toHaveValue('Console for Luke');
 		await expect(page.getByLabel('Description', { exact: true })).toHaveValue('');
@@ -446,11 +456,20 @@ test('offers the AI opt-out before lookup even while settings are still loading'
 	});
 	try {
 		await page.goto(origin + '/capture', { waitUntil: 'domcontentloaded' });
-		const optOut = page.getByRole('checkbox', { name: 'Use AI for missing page details' });
+		const optOut = page.getByRole('checkbox', { name: 'Use AI for missing link details' });
 		await expect(optOut).toBeVisible({ timeout: 1500 });
 		await expect(
-			page.getByText('Product content may be sent to Google.', { exact: false })
+			page.getByText('Sends page content to Google when link details are missing.', { exact: true })
 		).toBeVisible();
+		const linkBox = await page.getByLabel('Product link', { exact: true }).boundingBox();
+		const optOutBox = await optOut.boundingBox();
+		const photosBox = await page.getByLabel('Photos', { exact: false }).boundingBox();
+		expect(linkBox).not.toBeNull();
+		expect(optOutBox).not.toBeNull();
+		expect(photosBox).not.toBeNull();
+		expect(optOutBox!.y).toBeGreaterThan(linkBox!.y);
+		expect(optOutBox!.y).toBeLessThan(photosBox!.y);
+		await expect(page.getByRole('button', { name: 'Fill from image', exact: true })).toHaveCount(0);
 		await optOut.uncheck();
 		await page.getByLabel('Product link', { exact: true }).fill('https://shop.example/opt-out');
 		await expect.poll(() => assists).toEqual([false]);
