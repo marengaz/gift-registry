@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount, untrack } from 'svelte';
+	import { onMount, untrack, type Snippet } from 'svelte';
 	import type { CaptureDraft } from '#lib/catalogue-types.ts';
 	import {
 		applySuggestion,
@@ -12,13 +12,17 @@
 		photos = $bindable([]),
 		disabled = false,
 		ensureLocal,
-		onQuidcoLookup
+		onQuidcoLookup,
+		linkActions,
+		children
 	}: {
 		draft: CaptureDraft;
 		photos?: File[];
 		disabled?: boolean;
 		ensureLocal?: () => Promise<void>;
 		onQuidcoLookup?: (url: string, options: { explicit: boolean; signal: AbortSignal }) => void;
+		linkActions?: Snippet;
+		children?: Snippet;
 	} = $props();
 	let message = $state('');
 	let busy = $state(false);
@@ -28,6 +32,9 @@
 	let allowAI = $state(true);
 	let ai = $state({ configured: false, enabled: false });
 	let selectedImage = $state(0);
+	let messageArea = $state<'link' | 'image'>('link');
+	let patchArea = $state<'link' | 'image'>('link');
+	let choicesArea = $state<'link' | 'image'>('link');
 	let choices = $state<ProductSuggestion[]>([]);
 	let duplicates = $state<{ id: string; title: string }[]>([]);
 	let duplicatesDismissed = $state(false);
@@ -45,6 +52,19 @@
 	let lastOperation: { fingerprint: string; id: string } | undefined;
 	let controller: AbortController | undefined;
 	let photoController: AbortController | undefined;
+	const hasUndo = $derived(!!patch && patchDraft === draft);
+	const hasChoices = $derived(
+		!!choices.length && choicesDraft === draft && choicesSource === draft.sourceUrl
+	);
+	const showPhotoSection = $derived(
+		!!photos.length ||
+			photoBusy ||
+			!!photoMessage ||
+			(!!draft.browserCapture?.imageUrl && !photos.length) ||
+			(messageArea === 'image' && !!message) ||
+			(patchArea === 'image' && hasUndo) ||
+			(choicesArea === 'image' && hasChoices)
+	);
 	$effect(() => {
 		const next = draft;
 		untrack(() => {
@@ -59,6 +79,9 @@
 			message = '';
 			photoMessage = '';
 			blockedLink = false;
+			messageArea = 'link';
+			patchArea = 'link';
+			choicesArea = 'link';
 			choices = [];
 			duplicates = [];
 			duplicatesDismissed = false;
@@ -110,12 +133,19 @@
 		if (!draft.sourceText.includes(text))
 			draft.sourceText = [draft.sourceText, text].filter(Boolean).join('\n');
 	}
-	async function useCandidate(candidate: ProductSuggestion, current: () => boolean) {
+	async function useCandidate(
+		candidate: ProductSuggestion,
+		current: () => boolean,
+		area: 'link' | 'image'
+	) {
 		if (!current()) return;
 		const generation = ++autofillGeneration;
+		blockedLink = false;
 		choices = [];
 		patch = applySuggestion(draft, candidate);
 		patchDraft = draft;
+		patchArea = area;
+		messageArea = area;
 		importedPhoto = undefined;
 		evidence(candidate);
 		message = [
@@ -158,6 +188,7 @@
 			if (importedPhoto && !draft.editedFields?.includes('photos'))
 				photos = photos.filter((photo) => photo !== importedPhoto);
 		}
+		messageArea = patchArea;
 		patch = null;
 		importedPhoto = undefined;
 		message = 'Autofill undone. Your edits and list choices are kept.';
@@ -177,6 +208,7 @@
 		const loadingMessage = 'Reading product details…';
 		busy = true;
 		blockedLink = false;
+		messageArea = 'link';
 		choices = [];
 		patch = null;
 		message = loadingMessage;
@@ -228,10 +260,11 @@
 			if (result.suggestions.length > 1) {
 				choicesDraft = draft;
 				choicesSource = draft.sourceUrl;
+				choicesArea = 'link';
 				choices = result.suggestions;
 				message = 'Which item? Choose the product you mean before filling its details.';
 			} else {
-				await useCandidate(result.suggestions[0], canApply);
+				await useCandidate(result.suggestions[0], canApply, 'link');
 				if (canApply() && result.aiUnavailable) message += ' ' + result.message;
 			}
 		} catch (error) {
@@ -254,7 +287,9 @@
 	}
 	async function fill(kind: 'image' | 'text') {
 		if (busy || disabled) return;
+		const area = kind === 'image' ? 'image' : 'link';
 		if (!navigator.onLine) {
+			messageArea = area;
 			message = 'Go online to fill details. Your idea can still be kept on this device.';
 			return;
 		}
@@ -285,6 +320,7 @@
 		const canApply = () => active() && sameTarget() && !disabled;
 		const loadingMessage = 'Reading the supplied ' + kind + '…';
 		busy = true;
+		messageArea = area;
 		choices = [];
 		patch = null;
 		message = loadingMessage;
@@ -321,12 +357,13 @@
 			if (result?.ambiguity || result?.suggestions?.length > 1) {
 				choicesDraft = draft;
 				choicesSource = draft.sourceUrl;
+				choicesArea = area;
 				choices = result.suggestions ?? [];
 				message =
 					'More than one item or price is visible. Crop the image to one product and try again, or choose an item below.';
 			} else if (result?.suggestions?.length) {
 				applied = true;
-				await useCandidate(result.suggestions[0], canApply);
+				await useCandidate(result.suggestions[0], canApply, area);
 			} else
 				message =
 					result?.message ||
@@ -443,6 +480,23 @@
 	});
 </script>
 
+{#snippet choicePicker()}
+	<fieldset>
+		<legend>Which item?</legend>{#each choices as candidate}<button
+				type="button"
+				class="secondary"
+				{disabled}
+				onclick={() => {
+					void useCandidate(
+						candidate,
+						() => !disabled && draft === choicesDraft && draft.sourceUrl === choicesSource,
+						choicesArea
+					);
+				}}>Use {candidate.title ?? 'this item'}</button
+			>{/each}
+	</fieldset>
+{/snippet}
+
 <div class="metadata-help">
 	{#if duplicates.length && !duplicatesDismissed}<div class="notice">
 			<p>This idea may already be saved.</p>
@@ -459,15 +513,12 @@
 			>
 		</div>{/if}
 	<label class="check-label ai-option"
-		><input type="checkbox" bind:checked={allowAI} /><span>Use AI for missing page details</span
+		><input type="checkbox" bind:checked={allowAI} /><span>Use AI for missing link details</span
 		></label
 	>
-	<small
-		>Product content may be sent to Google. Images are sent only when you choose Fill from image.</small
-	>
+	<small>Sends page content to Google when link details are missing.</small>
 	{#if ai.configured && !ai.enabled}<p class="muted">
-			AI help is disabled. The administrator can enable it in Identification settings. You can still
-			save ideas.
+			AI help is off in Identification settings. You can still save ideas.
 		</p>{/if}
 	<div class="source-actions">
 		<button
@@ -477,36 +528,22 @@
 			onclick={() => retrieve(draft.sourceUrl, true)}
 			>{busy ? 'Reading source…' : 'Look up retailer details'}</button
 		>
-		{#if photos.length}
-			{#if photos.length > 1}<label
-					>Image to read<select bind:value={selectedImage}
-						>{#each photos as photo, index}<option value={index}>{photo.name}</option
-							>{/each}</select
-					></label
-				>{/if}
-			<button
-				type="button"
-				class="secondary"
-				disabled={disabled || busy}
-				onclick={() => fill('image')}>Fill from image</button
-			>
-		{/if}
+		{@render linkActions?.()}
 		{#if draft.sourceText.trim()}<button
 				type="button"
 				class="quiet"
 				disabled={disabled || busy}
 				onclick={() => fill('text')}>Fill from text</button
 			>{/if}
-		{#if patch && patchDraft === draft}<button type="button" class="quiet" {disabled} onclick={undo}
-				>Undo autofill</button
+		{#if hasUndo && patchArea === 'link'}<button
+				type="button"
+				class="quiet"
+				{disabled}
+				onclick={undo}>Undo autofill</button
 			>{/if}
 	</div>
-	{#if photos.length}<p class="muted">
-			Preview or crop your image before filling details. Only the image you submit will be sent to
-			Google.
-		</p>{/if}
-	{#if message}<p class="muted" role="status">{message}</p>{/if}
-	{#if blockedLink}<div class="source-actions">
+	{#if messageArea === 'link' && message}<p class="muted" role="status">{message}</p>{/if}
+	{#if blockedLink && messageArea === 'link'}<div class="source-actions">
 			<label class="button secondary"
 				>Add screenshot<input
 					class="visually-hidden"
@@ -531,32 +568,53 @@
 					rel="noopener noreferrer">Open product page</a
 				>{/if}
 		</div>{/if}
-	{#if choices.length && choicesDraft === draft && choicesSource === draft.sourceUrl}<fieldset>
-			<legend>Which item?</legend>{#each choices as candidate}<button
-					type="button"
-					class="secondary"
-					{disabled}
-					onclick={() => {
-						void useCandidate(
-							candidate,
-							() => !disabled && draft === choicesDraft && draft.sourceUrl === choicesSource
-						);
-					}}>Use {candidate.title ?? 'this item'}</button
-				>{/each}
-		</fieldset>{/if}
-	{#if photoBusy}<p role="status" class="muted">Copying shop photo…</p>{/if}
-	{#if photoMessage}<p role="status" class="muted">{photoMessage}</p>{/if}
-	{#if draft.browserCapture?.imageUrl && !photos.length}<button
-			type="button"
-			class="quiet"
-			disabled={disabled || photoBusy}
-			onclick={importBrowserPhoto}>Retry shop photo</button
-		>{/if}
+	{#if choicesArea === 'link' && hasChoices}{@render choicePicker()}{/if}
 </div>
 
+{@render children?.()}
+
+{#if showPhotoSection}
+	<div class="photo-prefill">
+		{#if photos.length || (hasUndo && patchArea === 'image')}<div class="source-actions">
+				{#if photos.length > 1}<label
+						>Image to read<select bind:value={selectedImage}
+							>{#each photos as photo, index}<option value={index}>{photo.name}</option
+								>{/each}</select
+						></label
+					>{/if}
+				{#if photos.length}<button
+						type="button"
+						class="secondary"
+						disabled={disabled || busy}
+						onclick={() => fill('image')}>Fill from image</button
+					>{/if}
+				{#if hasUndo && patchArea === 'image'}<button
+						type="button"
+						class="quiet"
+						{disabled}
+						onclick={undo}>Undo autofill</button
+					>{/if}
+			</div>{/if}
+		{#if photos.length}<small
+				>Sends only the selected image to Google. Crop above first if needed.</small
+			>{/if}
+		{#if messageArea === 'image' && message}<p class="muted" role="status">{message}</p>{/if}
+		{#if choicesArea === 'image' && hasChoices}{@render choicePicker()}{/if}
+		{#if photoBusy}<p role="status" class="muted">Copying shop photo…</p>{/if}
+		{#if photoMessage}<p role="status" class="muted">{photoMessage}</p>{/if}
+		{#if draft.browserCapture?.imageUrl && !photos.length}<button
+				type="button"
+				class="quiet"
+				disabled={disabled || photoBusy}
+				onclick={importBrowserPhoto}>Retry shop photo</button
+			>{/if}
+	</div>
+{/if}
+
 <style>
-	.metadata-help {
-		margin: 0.75rem 0 1rem;
+	.metadata-help,
+	.photo-prefill {
+		margin: 0.5rem 0 1rem;
 	}
 	.source-actions {
 		display: flex;
@@ -565,11 +623,16 @@
 		gap: 0.6rem;
 		margin-top: 0.6rem;
 	}
+	.photo-prefill .source-actions {
+		margin-top: 0;
+		margin-bottom: 0.35rem;
+	}
 	.ai-option {
 		font-size: 0.85rem;
-		margin-bottom: 0.3rem;
+		margin: 0 0 0.2rem;
 	}
 	small {
+		display: block;
 		color: var(--muted);
 	}
 	fieldset {

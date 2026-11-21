@@ -47,6 +47,7 @@
 	} = $props();
 	const componentId = $props.id();
 	const couponHelpId = `${componentId}-coupon-help`;
+	const textHelpId = `${componentId}-text-help`;
 	let online = $state(true);
 	let validation = $state('');
 	let showText = $state(false);
@@ -224,11 +225,21 @@
 		submit();
 	}}
 >
+	{#snippet titleField()}
+		<label
+			>Title <input
+				bind:value={draft.title}
+				oninput={() => markEdited(draft, 'title')}
+				placeholder={editing ? 'Product name' : 'Optional — filled from link or photo'}
+			/></label
+		>
+	{/snippet}
+
 	<fieldset class="draft-fields" disabled={locked}>
 		<p class="muted">
 			{editing
 				? 'Update this idea’s details and the lists it belongs to.'
-				: 'This is one idea. Start with a link, a photo or a name, and fill in as much as you know.'}
+				: 'Start with a link, photo, or title — fill in what you know.'}
 		</p>
 		<label
 			>Product link <input
@@ -237,80 +248,84 @@
 				placeholder="Paste a shop or social media link"
 			/></label
 		>
-		{#if !editing}<MetadataPrefill
+		{#if !editing}
+			<MetadataPrefill
 				bind:draft
 				bind:photos
 				disabled={locked || busy}
 				ensureLocal={onEnsureLocal}
 				onQuidcoLookup={lookupQuidco}
-			/>{/if}
-		{#if !editing}<button
-				type="button"
-				class="quiet"
-				onclick={() => {
-					showText = !showText;
-				}}>Paste text</button
-			>{/if}
-		{#if showText}<label
-				>Text to read<textarea
-					rows="3"
-					bind:value={draft.sourceText}
-					placeholder="Paste a caption, product description or message"></textarea></label
-			>{/if}
-		<label
-			>Title <input
-				bind:value={draft.title}
-				oninput={() => markEdited(draft, 'title')}
-				placeholder="Optional — we’ll try to find this from your link"
-			/></label
-		>
-		{#if !editing}
-			<label
-				>Photos <input
-					type="file"
-					accept="image/jpeg,image/png,image/webp,image/heic,image/avif"
-					multiple
-					onchange={(event) => {
-						const input = event.target as HTMLInputElement;
-						const added = Array.from(input.files ?? []);
-						photos = [
-							...photos.filter((file) => !added.some((next) => next.name === file.name)),
-							...added
-						];
-						markEdited(draft, 'photos');
-						if (draft.browserCapture) draft.browserCapture.imageUrl = '';
-						input.value = '';
-					}}
-				/>
-				<small>JPEG, PNG or WebP recommended. Up to 12 MB and 30 megapixels per photo.</small>
-			</label>
-			{#if photos.length}<ul class="photo-previews">
-					{#each photos as picture, index}<li>
-							<ImageCaptureTools
-								file={picture}
-								disabled={locked || busy}
-								onReplace={(replacement) => {
-									photos = photos.map((file, position) =>
-										position === index ? replacement : file
-									);
-									markEdited(draft, 'photos');
-									if (draft.browserCapture) draft.browserCapture.imageUrl = '';
-								}}
-							/>
-							<span>{picture.name}</span>
-							<button
-								type="button"
-								class="quiet"
-								aria-label={`Remove ${picture.name}`}
-								onclick={() => {
-									markEdited(draft, 'photos');
-									if (draft.browserCapture) draft.browserCapture.imageUrl = '';
-									photos = photos.filter((_, position) => position !== index);
-								}}>Remove photo</button
-							>
-						</li>{/each}
-				</ul>{/if}
-			{#if photoError}<p role="alert" class="notice error">{photoError}</p>{/if}
+			>
+				{#snippet linkActions()}
+					<button
+						type="button"
+						class="quiet"
+						aria-expanded={showText}
+						onclick={() => {
+							showText = !showText;
+						}}>Paste text</button
+					>
+				{/snippet}
+				{#if showText}<div class="text-source-field">
+						<label
+							>Text to read<textarea
+								rows="3"
+								aria-describedby={textHelpId}
+								bind:value={draft.sourceText}
+								placeholder="Paste a caption, product description or message"></textarea></label
+						>
+						<small id={textHelpId}>Using Fill from text sends this text to Google.</small>
+					</div>{/if}
+				{@render titleField()}
+				<label
+					>Photos <input
+						type="file"
+						accept="image/jpeg,image/png,image/webp,image/heic,image/avif"
+						multiple
+						onchange={(event) => {
+							const input = event.target as HTMLInputElement;
+							const added = Array.from(input.files ?? []);
+							photos = [
+								...photos.filter((file) => !added.some((next) => next.name === file.name)),
+								...added
+							];
+							markEdited(draft, 'photos');
+							if (draft.browserCapture) draft.browserCapture.imageUrl = '';
+							input.value = '';
+						}}
+					/>
+					<small>JPEG, PNG or WebP · up to 12 MB.</small>
+				</label>
+				{#if photos.length}<ul class="photo-previews">
+						{#each photos as picture, index}<li>
+								<ImageCaptureTools
+									file={picture}
+									disabled={locked || busy}
+									onReplace={(replacement) => {
+										photos = photos.map((file, position) =>
+											position === index ? replacement : file
+										);
+										markEdited(draft, 'photos');
+										if (draft.browserCapture) draft.browserCapture.imageUrl = '';
+									}}
+								/>
+								<span>{picture.name}</span>
+								<button
+									type="button"
+									class="quiet"
+									aria-label={`Remove ${picture.name}`}
+									onclick={() => {
+										markEdited(draft, 'photos');
+										if (draft.browserCapture) draft.browserCapture.imageUrl = '';
+										photos = photos.filter((_, position) => position !== index);
+									}}>Remove photo</button
+								>
+							</li>{/each}
+					</ul>{/if}
+				{#if photoError}<p role="alert" class="notice error">{photoError}</p>{/if}
+			</MetadataPrefill>
+		{:else}
+			{@render titleField()}
 		{/if}
 		<label
 			>Description <textarea
@@ -522,11 +537,17 @@
 	.draft-fields:disabled {
 		opacity: 0.7;
 	}
-	.coupon-field {
+	.coupon-field,
+	.text-source-field {
 		margin: 0.85rem 0;
 	}
-	.coupon-field label {
+	.coupon-field label,
+	.text-source-field label {
 		margin: 0 0 0.35rem;
+	}
+	.text-source-field small {
+		display: block;
+		color: var(--muted);
 	}
 	.list-selection {
 		margin: 1.4rem 0;
