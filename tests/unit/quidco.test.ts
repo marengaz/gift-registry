@@ -3,14 +3,16 @@ import {
 	formatCashbackCode,
 	lookupQuidcoCashback,
 	matchQuidcoMerchant,
-	normaliseMerchantTarget,
 	parseQuidcoCatalog,
 	quidcoSearchUrl,
+	registrableDomain,
 	resetQuidcoCache
 } from '../../src/lib/server/enrichment/quidco';
 
+const CURRYS_WATCH_URL =
+	'https://www.currys.co.uk/products/samsung-galaxy-watch8-bt-with-bixby-graphite-40-mm-10286746.html';
+
 const sampleCatalogPayload = {
-	excluded_subdomains: ['news.sky.com'],
 	merchants: [
 		{
 			id: '296',
@@ -21,13 +23,6 @@ const sampleCatalogPayload = {
 			url: 'https://www.quidco.com/boots/'
 		},
 		{
-			id: '100',
-			name: 'Currys',
-			domain: 'currys.co.uk',
-			reward: 'Up to 18.75% / £75 cashback',
-			url: 'https://www.quidco.com/currys/'
-		},
-		{
 			id: '101',
 			name: 'Currys Business',
 			domain: 'business.currys.co.uk',
@@ -35,11 +30,11 @@ const sampleCatalogPayload = {
 			url: 'https://www.quidco.com/currys-business/'
 		},
 		{
-			id: '200',
-			name: 'Sky',
-			domain: 'sky.com',
-			reward: 'Up to £100 cashback',
-			url: 'https://www.quidco.com/sky/'
+			id: '100',
+			name: 'Currys',
+			domain: 'currys.co.uk',
+			reward: 'Up to 18.75% / £75 cashback',
+			url: 'https://www.quidco.com/currys/'
 		},
 		{
 			id: '300',
@@ -58,34 +53,28 @@ const sampleCatalogPayload = {
 	]
 };
 
-describe('quidco cashback matching and formatting', () => {
+describe('quidco top-level domain matching and formatting', () => {
 	beforeEach(() => {
 		resetQuidcoCache();
 	});
 
-	it('normalises valid public merchant URLs and rejects invalid or local ones', () => {
-		expect(normaliseMerchantTarget('https://www.boots.com/product/123/')).toEqual({
-			host: 'boots.com',
-			pathname: '/product/123'
-		});
-		expect(normaliseMerchantTarget('https://www2.Currys.co.uk/tv')).toEqual({
-			host: 'currys.co.uk',
-			pathname: '/tv'
-		});
-		expect(normaliseMerchantTarget('')).toBeNull();
-		expect(normaliseMerchantTarget('not-a-url')).toBeNull();
-		expect(normaliseMerchantTarget('ftp://boots.com/item')).toBeNull();
-		expect(normaliseMerchantTarget('http://localhost:3000/item')).toBeNull();
-		expect(normaliseMerchantTarget('https://127.0.0.1/item')).toBeNull();
-		expect(normaliseMerchantTarget('https://user:pass@boots.com/item')).toBeNull();
+	it('extracts only the top-level registrable domain from URLs and hostnames', () => {
+		expect(registrableDomain(CURRYS_WATCH_URL)).toBe('currys.co.uk');
+		expect(registrableDomain('https://shop.currys.co.uk/tv')).toBe('currys.co.uk');
+		expect(registrableDomain('https://www2.boots.com/product/123/')).toBe('boots.com');
+		expect(registrableDomain('currys.co.uk')).toBe('currys.co.uk');
+		expect(registrableDomain('')).toBeNull();
+		expect(registrableDomain('not-a-url')).toBeNull();
+		expect(registrableDomain('ftp://boots.com/item')).toBeNull();
+		expect(registrableDomain('http://localhost:3000/item')).toBeNull();
+		expect(registrableDomain('https://127.0.0.1/item')).toBeNull();
+		expect(registrableDomain('https://user:pass@boots.com/item')).toBeNull();
 	});
 
-	it('builds a clean Quidco search URL from a merchant link', () => {
+	it('builds a clean Quidco search URL from a merchant link or domain', () => {
+		expect(quidcoSearchUrl(CURRYS_WATCH_URL)).toBe('https://www.quidco.com/search/?q=currys');
 		expect(quidcoSearchUrl('https://www.johnlewis.com/item/1')).toBe(
 			'https://www.quidco.com/search/?q=johnlewis'
-		);
-		expect(quidcoSearchUrl('https://www.currys.co.uk/tv')).toBe(
-			'https://www.quidco.com/search/?q=currys'
 		);
 		expect(quidcoSearchUrl('not a link')).toBeNull();
 	});
@@ -99,27 +88,19 @@ describe('quidco cashback matching and formatting', () => {
 		expect(formatCashbackCode(veryLong)?.length).toBe(255);
 	});
 
-	it('matches exact domains, subdomains, longest domain, path-scoped domains, and honours exclusions', () => {
+	it('matches strictly by top-level registrable domain and prefers exact root merchant entries', () => {
 		const catalog = parseQuidcoCatalog(sampleCatalogPayload);
+		expect(matchQuidcoMerchant(CURRYS_WATCH_URL, catalog)?.name).toBe('Currys');
+		expect(matchQuidcoMerchant('https://business.currys.co.uk/laptop', catalog)?.name).toBe(
+			'Currys'
+		);
 		expect(matchQuidcoMerchant('https://www.boots.com/toy', catalog)?.name).toBe('Boots');
 		expect(matchQuidcoMerchant('https://notboots.com/toy', catalog)).toBeNull();
-		expect(matchQuidcoMerchant('https://business.currys.co.uk/laptop', catalog)?.name).toBe(
-			'Currys Business'
-		);
-		expect(matchQuidcoMerchant('https://shop.currys.co.uk/laptop', catalog)?.name).toBe('Currys');
-		expect(matchQuidcoMerchant('https://news.sky.com/story', catalog)).toBeNull();
-		expect(matchQuidcoMerchant('https://www.sky.com/tv', catalog)?.name).toBe('Sky');
-		expect(matchQuidcoMerchant('https://www.pizzahut.co.uk/delivery/menu', catalog)?.name).toBe(
-			'Pizza Hut Delivery'
-		);
-		expect(matchQuidcoMerchant('https://www.pizzahut.co.uk/restaurants', catalog)).toBeNull();
 		// Rejects unsafe non-Quidco URLs from catalog entries
-		expect(
-			matchQuidcoMerchant('https://www.pizzahut.co.uk/delivery/menu', catalog)?.url
-		).toBeNull();
+		expect(matchQuidcoMerchant('https://www.pizzahut.co.uk/anything', catalog)?.url).toBeNull();
 	});
 
-	it('caches catalog with ETag / 304 support and backs off cleanly on 403', async () => {
+	it('caches catalog with ETag / 304 support and resolves the Currys watch URL', async () => {
 		let clock = 1_000_000;
 		const fetchMock = vi
 			.fn<typeof fetch>()
@@ -131,16 +112,17 @@ describe('quidco cashback matching and formatting', () => {
 			)
 			.mockResolvedValueOnce(new Response(null, { status: 304 }));
 
-		const first = await lookupQuidcoCashback('https://www.boots.com/lego', {
+		const first = await lookupQuidcoCashback(CURRYS_WATCH_URL, {
 			catalogUrl: 'https://example.test/merchants.json',
 			fetchImpl: fetchMock,
 			now: () => clock
 		});
 		expect(first).toEqual({
-			cashback: 'Quidco: Up to 3.75% cashback',
-			merchantName: 'Boots',
-			quidcoUrl: 'https://www.quidco.com/boots/',
-			searchUrl: 'https://www.quidco.com/search/?q=boots',
+			domain: 'currys.co.uk',
+			cashback: 'Quidco: Up to 18.75% / £75 cashback',
+			merchantName: 'Currys',
+			quidcoUrl: 'https://www.quidco.com/currys/',
+			searchUrl: 'https://www.quidco.com/search/?q=currys',
 			available: true
 		});
 		expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -157,7 +139,7 @@ describe('quidco cashback matching and formatting', () => {
 
 		// After TTL -> sends If-None-Match and honours 304
 		clock += 7 * 60 * 60 * 1000;
-		const third = await lookupQuidcoCashback('https://www.boots.com/lego', {
+		const third = await lookupQuidcoCashback('boots.com', {
 			catalogUrl: 'https://example.test/merchants.json',
 			fetchImpl: fetchMock,
 			now: () => clock
@@ -173,16 +155,17 @@ describe('quidco cashback matching and formatting', () => {
 			.fn<typeof fetch>()
 			.mockResolvedValue(new Response('Attention Required! | Cloudflare', { status: 403 }));
 
-		const first = await lookupQuidcoCashback('https://www.johnlewis.com/item', {
+		const first = await lookupQuidcoCashback(CURRYS_WATCH_URL, {
 			catalogUrl: 'https://example.test/blocked.json',
 			fetchImpl: fetchMock,
 			now: () => clock
 		});
 		expect(first).toEqual({
+			domain: 'currys.co.uk',
 			cashback: null,
 			merchantName: null,
 			quidcoUrl: null,
-			searchUrl: 'https://www.quidco.com/search/?q=johnlewis',
+			searchUrl: 'https://www.quidco.com/search/?q=currys',
 			available: false
 		});
 		expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -202,6 +185,7 @@ describe('quidco cashback matching and formatting', () => {
 		const fetchMock = vi.fn<typeof fetch>();
 		const empty = await lookupQuidcoCashback('', { fetchImpl: fetchMock });
 		expect(empty).toEqual({
+			domain: null,
 			cashback: null,
 			merchantName: null,
 			quidcoUrl: null,

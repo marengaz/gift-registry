@@ -12,6 +12,7 @@
 		photos = $bindable([]),
 		disabled = false,
 		ensureLocal,
+		onQuidcoLookup,
 		linkActions,
 		children
 	}: {
@@ -19,6 +20,7 @@
 		photos?: File[];
 		disabled?: boolean;
 		ensureLocal?: () => Promise<void>;
+		onQuidcoLookup?: (url: string, options: { explicit: boolean; signal: AbortSignal }) => void;
 		linkActions?: Snippet;
 		children?: Snippet;
 	} = $props();
@@ -230,6 +232,7 @@
 					}
 				})
 				.catch(() => {});
+			onQuidcoLookup?.(url, { explicit, signal: requestController.signal });
 			const response = await fetch('/api/metadata', {
 				method: 'POST',
 				headers: { 'content-type': 'application/json' },
