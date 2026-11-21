@@ -1,10 +1,17 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	import MetadataPrefill from './MetadataPrefill.svelte';
 	import ImageCaptureTools from './ImageCaptureTools.svelte';
 	import { reviewFingerprint } from '#lib/shared/photo-shopping-links.ts';
 	import { markEdited } from '#lib/client/capture-autofill.ts';
 	import type { CaptureDraft, GiftList } from '#lib/catalogue-types.ts';
+	type QuidcoInfo = {
+		cashback: string | null;
+		merchantName: string | null;
+		quidcoUrl: string | null;
+		searchUrl: string | null;
+		available: boolean;
+	};
 	let {
 		draft = $bindable(),
 		photos = $bindable([]),
@@ -36,10 +43,19 @@
 		onSave: () => void;
 		onListsChanged?: () => void;
 	} = $props();
+	const componentId = $props.id();
+	const couponHelpId = `${componentId}-coupon-help`;
 	let online = $state(true);
 	let validation = $state('');
 	let showText = $state(false);
 	let listSearch = $state('');
+	let quidcoBusy = $state(false);
+	let quidcoInfo = $state<(QuidcoInfo & { url: string }) | null>(null);
+	let autoPopulatedCoupon = $state<string | null>(null);
+	let renderedDraft: CaptureDraft | undefined;
+	let lastQuidcoDraft: CaptureDraft | undefined;
+	let lastQuidcoUrl = '';
+	let quidcoController: AbortController | undefined;
 	const localOnly = $derived(localCapture && (!online || !canSynchronise));
 	const saveLabel = $derived.by(() => {
 		if (busy) return 'Saving…';
@@ -51,6 +67,135 @@
 			? 'Each photo must be 12 MB or smaller. Remove the large photo or choose a smaller copy.'
 			: ''
 	);
+	const activeQuidcoInfo = $derived(
+		quidcoInfo && quidcoInfo.url === draft.sourceUrl.trim() ? quidcoInfo : null
+	);
+	const quidcoFallbackSearchUrl = $derived.by(() => {
+		const raw = draft.sourceUrl.trim();
+		if (!raw || !URL.canParse(raw)) return null;
+		const parsed = new URL(raw);
+		if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password)
+			return null;
+		const host = parsed.hostname
+			.replace(/^\[|\]$/g, '')
+			.toLowerCase()
+			.replace(/^www\d*\./, '');
+		if (
+			!host ||
+			host === 'localhost' ||
+			host.endsWith('.localhost') ||
+			!host.includes('.') ||
+			/^\d+(\.\d+){3}$/.test(host) ||
+			host.includes(':')
+		)
+			return null;
+		const query = host
+			.replace(/\.(co|org|me|ltd|plc)\.uk$/, '')
+			.replace(/\.(com|uk|net|org|co|io|shop|store)$/, '')
+			.replace(/[.-]+/g, ' ')
+			.trim();
+		return query ? `https://www.quidco.com/search/?q=${encodeURIComponent(query)}` : null;
+	});
+	$effect(() => {
+		const next = draft;
+		untrack(() => {
+			if (renderedDraft === next) return;
+			renderedDraft = next;
+			if (next.couponCode === undefined) next.couponCode = '';
+			quidcoController?.abort();
+			quidcoController = undefined;
+			quidcoBusy = false;
+			quidcoInfo = null;
+			autoPopulatedCoupon = null;
+			// When editing an existing idea, never silently populate couponCode until sourceUrl changes.
+			lastQuidcoDraft = editing ? next : undefined;
+			lastQuidcoUrl = editing ? next.sourceUrl.trim() : '';
+		});
+	});
+	$effect(() => {
+		const url = draft.sourceUrl.trim();
+		const manuallyEdited = draft.editedFields?.includes('couponCode') ?? false;
+		const validLink =
+			!!url && URL.canParse(url) && ['http:', 'https:'].includes(new URL(url).protocol);
+		if (!validLink) {
+			untrack(() => {
+				quidcoController?.abort();
+				quidcoController = undefined;
+				quidcoBusy = false;
+				quidcoInfo = null;
+				lastQuidcoDraft = undefined;
+				lastQuidcoUrl = '';
+				if (!manuallyEdited && autoPopulatedCoupon && draft.couponCode === autoPopulatedCoupon) {
+					draft.couponCode = '';
+					autoPopulatedCoupon = null;
+				}
+			});
+			return;
+		}
+		if (locked || !online || manuallyEdited || (localCapture && !canSynchronise)) {
+			untrack(() => {
+				quidcoController?.abort();
+				quidcoController = undefined;
+				quidcoBusy = false;
+			});
+			return;
+		}
+		if (lastQuidcoDraft === draft && lastQuidcoUrl === url) return;
+		const requestedDraft = draft;
+		const timer = setTimeout(() => {
+			untrack(() => {
+				if (
+					draft !== requestedDraft ||
+					draft.sourceUrl.trim() !== url ||
+					locked ||
+					!online ||
+					(localCapture && !canSynchronise) ||
+					draft.editedFields?.includes('couponCode')
+				)
+					return;
+				quidcoController?.abort();
+				const requestController = new AbortController();
+				quidcoController = requestController;
+				quidcoBusy = true;
+				void fetch('/api/quidco?url=' + encodeURIComponent(url), {
+					cache: 'no-store',
+					signal: AbortSignal.any([requestController.signal, AbortSignal.timeout(8000)])
+				})
+					.then(async (response) => {
+						if (!response.ok) return null;
+						return (await response.json()) as QuidcoInfo;
+					})
+					.then((result) => {
+						if (
+							requestController.signal.aborted ||
+							draft !== requestedDraft ||
+							draft.sourceUrl.trim() !== url ||
+							locked
+						)
+							return;
+						lastQuidcoDraft = draft;
+						lastQuidcoUrl = url;
+						quidcoInfo = result ? { ...result, url } : null;
+						if (draft.editedFields?.includes('couponCode')) return;
+						if (result?.cashback) {
+							draft.couponCode = result.cashback;
+							autoPopulatedCoupon = result.cashback;
+						} else if (autoPopulatedCoupon && draft.couponCode === autoPopulatedCoupon) {
+							draft.couponCode = '';
+							autoPopulatedCoupon = null;
+						}
+					})
+					.catch(() => {})
+					.finally(() => {
+						if (quidcoController === requestController) {
+							quidcoController = undefined;
+							quidcoBusy = false;
+						}
+					});
+			});
+		}, 400);
+		return () => clearTimeout(timer);
+	});
 	onMount(() => {
 		const update = () => {
 			online = navigator.onLine;
@@ -59,6 +204,8 @@
 		window.addEventListener('online', update);
 		window.addEventListener('offline', update);
 		return () => {
+			quidcoController?.abort();
+			quidcoController = undefined;
 			window.removeEventListener('online', update);
 			window.removeEventListener('offline', update);
 		};
@@ -84,6 +231,10 @@
 			!draft.offers.some((offer) => offer.url.trim())
 		) {
 			validation = 'Add a link, a photo or a few words before saving your idea.';
+			return;
+		}
+		if ((draft.couponCode ?? '').trim().length > 255) {
+			validation = 'Coupon code must be 255 characters or fewer.';
 			return;
 		}
 		validation = '';
@@ -205,6 +356,35 @@
 			/>
 			{#if editing}<small>Edit prices beside each selected list below.</small>{/if}
 		</label>
+		<div class="coupon-field">
+			<label
+				>Coupon or cashback code <input
+					type="text"
+					maxlength="255"
+					aria-describedby={couponHelpId}
+					bind:value={draft.couponCode}
+					oninput={() => {
+						markEdited(draft, 'couponCode');
+						autoPopulatedCoupon = null;
+					}}
+					placeholder="Voucher code or Quidco cashback"
+				/></label
+			>
+			<small id={couponHelpId} class="coupon-help">
+				{#if quidcoBusy}Checking Quidco cashback…{:else if autoPopulatedCoupon && draft.couponCode === autoPopulatedCoupon && activeQuidcoInfo?.merchantName}Auto-filled
+					from Quidco for {activeQuidcoInfo.merchantName}. Type to replace with a voucher code.{#if activeQuidcoInfo.quidcoUrl}{' '}<a
+							href={activeQuidcoInfo.quidcoUrl}
+							target="_blank"
+							rel="noopener noreferrer">View on Quidco ↗</a
+						>{/if}{:else if activeQuidcoInfo?.searchUrl || quidcoFallbackSearchUrl}Optional — up to
+					255 characters. <a
+						href={activeQuidcoInfo?.searchUrl ?? quidcoFallbackSearchUrl}
+						target="_blank"
+						rel="noopener noreferrer">Check Quidco ↗</a
+					>{:else}Optional — up to 255 characters. Add a shop URL above to check Quidco cashback
+					automatically.{/if}
+			</small>
+		</div>
 		<fieldset class="list-selection">
 			<legend>Choose lists</legend>
 			{#if lists.length > 6}<label
@@ -363,6 +543,12 @@
 	}
 	.draft-fields:disabled {
 		opacity: 0.7;
+	}
+	.coupon-field {
+		margin: 0.85rem 0;
+	}
+	.coupon-field label {
+		margin: 0 0 0.35rem;
 	}
 	.list-selection {
 		margin: 1.4rem 0;

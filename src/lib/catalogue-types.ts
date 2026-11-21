@@ -27,13 +27,14 @@ export type ShoppingDraft = OfferReviewStatus & {
 	currency: string;
 };
 export type CaptureEditedField =
-	'title' | 'description' | 'variant' | 'estimate' | 'offers' | 'photos';
+	'title' | 'description' | 'variant' | 'estimate' | 'couponCode' | 'offers' | 'photos';
 export type CaptureDraft = {
 	title: string;
 	description: string;
 	variant: string;
 	sourceUrl: string;
 	sourceText: string;
+	couponCode: string;
 	listIds: string[];
 	estimate: string;
 	entryEstimates: Record<string, string>;
@@ -53,6 +54,7 @@ export const emptyDraft = (): CaptureDraft => ({
 	variant: '',
 	sourceUrl: '',
 	sourceText: '',
+	couponCode: '',
 	listIds: [],
 	estimate: '',
 	entryEstimates: {},
@@ -66,6 +68,7 @@ export function draftFromProduct(product: Product): CaptureDraft {
 		variant: product.variant ?? '',
 		sourceUrl: product.sourceUrl ?? '',
 		sourceText: product.sourceText ?? '',
+		couponCode: product.couponCode ?? '',
 		listIds: product.entries.map((e) => e.listId),
 		estimate: '',
 		entryEstimates: Object.fromEntries(
@@ -82,7 +85,8 @@ export function draftFromProduct(product: Product): CaptureDraft {
 			retailer: o.retailer ?? '',
 			price: priceInput(o.priceMinor, o.currency ?? 'GBP'),
 			currency: o.currency ?? 'GBP'
-		}))
+		})),
+		...(product.couponCode ? { editedFields: ['couponCode' as const] } : {})
 	};
 }
 export function currencyDigits(currency: string): number {
@@ -131,6 +135,7 @@ export function capturePayload(draft: CaptureDraft) {
 		variant: draft.variant,
 		sourceUrl: draft.sourceUrl,
 		sourceText: draft.sourceText,
+		couponCode: draft.couponCode ?? '',
 		listIds: draft.listIds,
 		estimatePence: pence(draft.estimate),
 		entryEstimates: Object.fromEntries(

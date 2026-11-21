@@ -74,8 +74,11 @@ it('upgrades prior records unchanged and recognises only a successful associated
 		.prepare("SELECT * FROM offers WHERE id='manual'")
 		.get() as Record<string, unknown>;
 	migrateDatabase(connection);
-	for (const { table, rows } of retained)
-		expect(connection.sqlite.prepare(`SELECT * FROM ${table}`).all()).toEqual(rows);
+	for (const { table, rows } of retained) {
+		const upgraded = connection.sqlite.prepare(`SELECT * FROM ${table}`).all();
+		expect(upgraded).toHaveLength(rows.length);
+		expect(upgraded).toMatchObject(rows);
+	}
 	expect(connection.sqlite.prepare("SELECT * FROM offers WHERE id='manual'").get()).toMatchObject(
 		manual
 	);

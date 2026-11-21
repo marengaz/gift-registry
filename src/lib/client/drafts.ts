@@ -313,6 +313,8 @@ export class DraftStore extends Dexie {
 			}
 			draft.sourceText = evidence.filter(Boolean).join('\n\n');
 			if (!draft.sourceUrl.trim()) draft.sourceUrl = incoming.draft.sourceUrl;
+			if (!draft.couponCode?.trim() && incoming.draft.couponCode?.trim())
+				draft.couponCode = incoming.draft.couponCode;
 			const photos = await this.blobs.where('draftId').equals(target.id).toArray();
 			const addedPhotos = await this.blobs.where('draftId').equals(incoming.id).sortBy('position');
 			const position = photos.reduce((last, photo) => Math.max(last, photo.position), -1) + 1;

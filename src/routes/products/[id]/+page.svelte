@@ -145,6 +145,10 @@
 						>
 							No description added yet.
 						</p>{/if}
+					{#if product.couponCode}<p class="coupon-detail">
+							<strong>Coupon / cashback:</strong>
+							<span class="coupon-value">{product.couponCode}</span>
+						</p>{/if}
 					<div class="badges">
 						{#each product.labels as label}<span class="badge">{label.name}</span>{/each}
 					</div>

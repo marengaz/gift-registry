@@ -15,6 +15,7 @@ function product(
 		contributorId: 'parent',
 		sourceUrl: null,
 		sourceText: null,
+		couponCode: null,
 		createdAt: 1,
 		updatedAt: 1,
 		offers: [],

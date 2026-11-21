@@ -401,7 +401,9 @@ function reverseAction(connection: DatabaseConnection, receipt: Receipt, snapsho
 		}
 		for (const saved of snapshots.products) {
 			const current = connection.db.select().from(products).where(eq(products.id, saved.id)).get();
-			if (current?.deletionToken !== receipt.id || !isDeepStrictEqual(current, saved)) unsafeUndo();
+			const expected = { ...saved, couponCode: saved.couponCode ?? null };
+			if (current?.deletionToken !== receipt.id || !isDeepStrictEqual(current, expected))
+				unsafeUndo();
 			const savedEntries = (entriesByProduct.get(saved.id) ?? []).sort((a, b) =>
 				a.id.localeCompare(b.id)
 			);
