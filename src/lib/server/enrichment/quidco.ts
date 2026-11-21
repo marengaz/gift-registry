@@ -1,8 +1,10 @@
-import { isIP } from 'node:net';
 import { AccessError, canCapture, requireMember } from '../access';
 import type { CatalogueEvent } from '../catalogue';
 import type { DatabaseConnection } from '../db/client';
 import { apiResponse } from '../http';
+import { quidcoSearchUrl, registrableDomain } from '../../shared/quidco';
+
+export { quidcoSearchUrl, registrableDomain };
 
 export const DEFAULT_QUIDCO_MERCHANTS_URL =
 	'https://tbd.cashbacksrv.com/quidco_com/p/merchants.json';
@@ -21,11 +23,11 @@ export type QuidcoMerchant = {
 };
 
 export type QuidcoCatalog = {
-	excludedSubdomains: string[];
-	merchants: QuidcoMerchant[];
+	merchantsByDomain: Map<string, QuidcoMerchant>;
 };
 
 export type QuidcoLookupResult = {
+	domain: string | null;
 	cashback: string | null;
 	merchantName: string | null;
 	quidcoUrl: string | null;
@@ -68,42 +70,6 @@ export function resetQuidcoCache() {
 	};
 }
 
-function stripWww(host: string): string {
-	return host.toLowerCase().replace(/^www\d*\./, '');
-}
-
-export function normaliseMerchantTarget(rawUrl: string): { host: string; pathname: string } | null {
-	const trimmed = rawUrl.trim();
-	if (!trimmed || !URL.canParse(trimmed)) return null;
-	const parsed = new URL(trimmed);
-	if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password)
-		return null;
-	const rawHost = parsed.hostname.replace(/^\[|\]$/g, '').toLowerCase();
-	if (
-		!rawHost ||
-		rawHost === 'localhost' ||
-		rawHost.endsWith('.localhost') ||
-		!rawHost.includes('.') ||
-		isIP(rawHost)
-	)
-		return null;
-	const host = stripWww(rawHost);
-	const pathname = parsed.pathname.toLowerCase().replace(/\/+$/, '') || '/';
-	return { host, pathname };
-}
-
-export function quidcoSearchUrl(rawUrl: string): string | null {
-	const target = normaliseMerchantTarget(rawUrl);
-	if (!target) return null;
-	const query = target.host
-		.replace(/\.(co|org|me|ltd|plc)\.uk$/, '')
-		.replace(/\.(com|uk|net|org|co|io|shop|store)$/, '')
-		.replace(/[.-]+/g, ' ')
-		.trim();
-	if (!query) return null;
-	return `https://www.quidco.com/search/?q=${encodeURIComponent(query)}`;
-}
-
 function safeQuidcoUrl(value: unknown): string | null {
 	if (typeof value !== 'string' || !value.trim() || !URL.canParse(value.trim())) return null;
 	const parsed = new URL(value.trim());
@@ -119,69 +85,62 @@ export function formatCashbackCode(reward: string): string | null {
 	return `Quidco: ${trimmed}`.slice(0, MAX_COUPON_LENGTH);
 }
 
-function normaliseCatalogDomain(raw: string): string {
-	return raw
+function normaliseCatalogEntry(raw: string): { host: string; hasPath: boolean } | null {
+	const cleaned = raw
 		.trim()
 		.toLowerCase()
 		.replace(/^https?:\/\//, '')
 		.replace(/^www\d*\./, '')
 		.replace(/\/+$/, '');
+	if (!cleaned) return null;
+	const slash = cleaned.indexOf('/');
+	const host = slash === -1 ? cleaned : cleaned.slice(0, slash);
+	return host ? { host, hasPath: slash !== -1 } : null;
 }
 
 export function parseQuidcoCatalog(raw: unknown): QuidcoCatalog {
 	if (!raw || typeof raw !== 'object' || Array.isArray(raw))
 		throw new Error('Invalid Quidco catalog');
 	const record = raw as Record<string, unknown>;
-	const excludedSubdomains = Array.isArray(record.excluded_subdomains)
-		? record.excluded_subdomains
-				.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
-				.map((value) => stripWww(value.trim()))
-		: [];
 	const rawMerchants = Array.isArray(record.merchants) ? record.merchants : [];
-	const merchants: QuidcoMerchant[] = [];
+	const merchantsByDomain = new Map<string, QuidcoMerchant>();
+	const ranks = new Map<string, number>();
+
 	for (const item of rawMerchants) {
 		if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
 		const entry = item as Record<string, unknown>;
-		const domain = typeof entry.domain === 'string' ? normaliseCatalogDomain(entry.domain) : '';
+		const parsedDomain =
+			typeof entry.domain === 'string' ? normaliseCatalogEntry(entry.domain) : null;
 		const reward = typeof entry.reward === 'string' ? entry.reward.trim() : '';
-		const name = typeof entry.name === 'string' ? entry.name.trim() : domain;
-		if (!domain || !reward) continue;
-		merchants.push({
-			domain,
-			name: name || domain,
+		if (!parsedDomain || !reward) continue;
+		const topDomain = registrableDomain(parsedDomain.host);
+		if (!topDomain) continue;
+
+		// Prefer exact top-level domain entries (rank 2) over subdomain entries (rank 1) over path-scoped entries (rank 0).
+		const rank = parsedDomain.hasPath ? 0 : parsedDomain.host === topDomain ? 2 : 1;
+		const existingRank = ranks.get(topDomain) ?? -1;
+		if (rank <= existingRank) continue;
+
+		const name = typeof entry.name === 'string' ? entry.name.trim() : topDomain;
+		ranks.set(topDomain, rank);
+		merchantsByDomain.set(topDomain, {
+			domain: topDomain,
+			name: name || topDomain,
 			reward,
 			rewardP2: typeof entry.reward_p2 === 'string' ? entry.reward_p2.trim() || null : null,
 			url: safeQuidcoUrl(entry.url)
 		});
 	}
-	return { excludedSubdomains, merchants };
+	return { merchantsByDomain };
 }
 
-export function matchQuidcoMerchant(rawUrl: string, catalog: QuidcoCatalog): QuidcoMerchant | null {
-	const target = normaliseMerchantTarget(rawUrl);
-	if (!target) return null;
-	const { host, pathname } = target;
-	for (const excluded of catalog.excludedSubdomains) {
-		if (host === excluded || host.endsWith('.' + excluded)) return null;
-	}
-	let best: QuidcoMerchant | null = null;
-	for (const merchant of catalog.merchants) {
-		const domain = merchant.domain;
-		if (!domain) continue;
-		let matched = false;
-		const slash = domain.indexOf('/');
-		if (slash !== -1) {
-			const domainHost = domain.slice(0, slash);
-			const domainPath = domain.slice(slash);
-			matched =
-				(host === domainHost || host.endsWith('.' + domainHost)) &&
-				(pathname === domainPath || pathname.startsWith(domainPath + '/'));
-		} else {
-			matched = host === domain || host.endsWith('.' + domain);
-		}
-		if (matched && (!best || domain.length > best.domain.length)) best = merchant;
-	}
-	return best;
+export function matchQuidcoMerchant(
+	rawUrlOrDomain: string,
+	catalog: QuidcoCatalog
+): QuidcoMerchant | null {
+	const topDomain = registrableDomain(rawUrlOrDomain);
+	if (!topDomain) return null;
+	return catalog.merchantsByDomain.get(topDomain) ?? null;
 }
 
 async function readResponseTextWithLimit(response: Response, maxBytes: number): Promise<string> {
@@ -281,12 +240,14 @@ async function fetchCatalog(
 }
 
 export async function lookupQuidcoCashback(
-	rawUrl: string,
+	rawUrlOrDomain: string,
 	options: QuidcoLookupOptions = {}
 ): Promise<QuidcoLookupResult> {
-	const searchUrl = quidcoSearchUrl(rawUrl);
-	if (!searchUrl) {
+	const domain = registrableDomain(rawUrlOrDomain);
+	const searchUrl = domain ? quidcoSearchUrl(domain) : null;
+	if (!domain || !searchUrl) {
 		return {
+			domain: null,
 			cashback: null,
 			merchantName: null,
 			quidcoUrl: null,
@@ -297,6 +258,7 @@ export async function lookupQuidcoCashback(
 	const rawConfigured = (options.catalogUrl ?? process.env.QUIDCO_MERCHANTS_URL ?? '').trim();
 	if (rawConfigured.toLowerCase() === 'disabled') {
 		return {
+			domain,
 			cashback: null,
 			merchantName: null,
 			quidcoUrl: null,
@@ -312,6 +274,7 @@ export async function lookupQuidcoCashback(
 	);
 	if (!catalog) {
 		return {
+			domain,
 			cashback: null,
 			merchantName: null,
 			quidcoUrl: null,
@@ -319,9 +282,10 @@ export async function lookupQuidcoCashback(
 			available: false
 		};
 	}
-	const merchant = matchQuidcoMerchant(rawUrl, catalog);
+	const merchant = matchQuidcoMerchant(domain, catalog);
 	if (!merchant) {
 		return {
+			domain,
 			cashback: null,
 			merchantName: null,
 			quidcoUrl: null,
@@ -331,6 +295,7 @@ export async function lookupQuidcoCashback(
 	}
 	const cashback = formatCashbackCode(merchant.reward);
 	return {
+		domain,
 		cashback,
 		merchantName: cashback ? merchant.name : null,
 		quidcoUrl: cashback ? (merchant.url ?? null) : null,
@@ -348,7 +313,7 @@ export function quidcoLookup(
 		const actor = requireMember(connection, event.locals.actor);
 		if (!canCapture(connection, actor))
 			throw new AccessError(403, 'Contributor permission is needed to check cashback rates.');
-		const source = event.url.searchParams.get('url') ?? '';
+		const source = event.url.searchParams.get('domain') ?? event.url.searchParams.get('url') ?? '';
 		if (source.length > 4000) throw new AccessError(400, 'This link is too long.');
 		return lookupQuidcoCashback(source, options);
 	});

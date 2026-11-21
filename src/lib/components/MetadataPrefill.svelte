@@ -11,12 +11,14 @@
 		draft = $bindable(),
 		photos = $bindable([]),
 		disabled = false,
-		ensureLocal
+		ensureLocal,
+		onQuidcoLookup
 	}: {
 		draft: CaptureDraft;
 		photos?: File[];
 		disabled?: boolean;
 		ensureLocal?: () => Promise<void>;
+		onQuidcoLookup?: (url: string, options: { explicit: boolean; signal: AbortSignal }) => void;
 	} = $props();
 	let message = $state('');
 	let busy = $state(false);
@@ -198,6 +200,7 @@
 					}
 				})
 				.catch(() => {});
+			onQuidcoLookup?.(url, { explicit, signal: requestController.signal });
 			const response = await fetch('/api/metadata', {
 				method: 'POST',
 				headers: { 'content-type': 'application/json' },
