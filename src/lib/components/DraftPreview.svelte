@@ -1,16 +1,19 @@
 <script lang="ts">
 	import { draftStore, type LocalDraft } from '#lib/client/drafts.ts';
+	import { downloadDraftThumbnail } from '#lib/client/wishlist-import.ts';
 	let { record }: { record: LocalDraft } = $props();
 	let source = $state('');
 	const draftId = $derived(record.id);
 	const ownerId = $derived(record.ownerId);
 	const updatedAt = $derived(record.updatedAt);
 	const productId = $derived(record.status === 'saved' ? record.ack?.productId : undefined);
+	const pendingImageUrl = $derived(record.draft.browserCapture?.imageUrl ?? '');
 	$effect(() => {
 		const id = draftId,
 			owner = ownerId;
 		const revision = updatedAt;
 		const savedProduct = productId;
+		const fallbackImageUrl = pendingImageUrl;
 		let disposed = false;
 		let objectUrl = '';
 		const controller = new AbortController();
@@ -36,6 +39,8 @@
 					const imageId = product.media?.[0]?.id;
 					if (typeof imageId === 'string' && (await current()))
 						source = '/api/media/' + encodeURIComponent(imageId);
+				} else if (fallbackImageUrl && typeof navigator !== 'undefined' && navigator.onLine) {
+					void downloadDraftThumbnail(record, draftStore, fetch, controller.signal);
 				}
 			})
 			.catch(() => {});

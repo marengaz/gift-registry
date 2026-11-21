@@ -1,4 +1,5 @@
 <script lang="ts">
+	import AddIdeaMenu from '#lib/components/AddIdeaMenu.svelte';
 	import IdeaCollection from '#lib/components/IdeaCollection.svelte';
 	import type { Product } from '#lib/catalogue-types.ts';
 	import { page } from '$app/state';
@@ -14,7 +15,7 @@
 			<h1>Catalogue</h1>
 			<p class="muted">Select ideas to add to lists, or organise one idea at a time.</p>
 		</div>
-		<a class="button" href="/capture">+ Add an idea</a>
+		<AddIdeaMenu />
 	</div>
 	<IdeaCollection
 		products={data.products as Product[]}

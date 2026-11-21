@@ -65,7 +65,7 @@
 		});
 		const online = () => {
 			offline = !navigator.onLine;
-			if (!offline && page.url.pathname !== '/capture') void retry();
+			if (!offline && !page.url.pathname.startsWith('/capture')) void retry();
 			else ready = true;
 		};
 		window.addEventListener('online', online);
@@ -91,7 +91,7 @@
 						? 'Some ideas need attention. Sign in as their author and check access before retrying.'
 						: 'Waiting to synchronise.'}
 			</p>
-			<a href="/capture">Review drafts</a><button
+			<a href="/capture/drafts">Review drafts</a><button
 				class="quiet"
 				disabled={busy || offline}
 				onclick={retry}>{busy ? 'Checking…' : 'Retry synchronisation'}</button
@@ -101,7 +101,7 @@
 				{unfinished.length + unbound} unfinished {unfinished.length + unbound === 1
 					? 'idea is'
 					: 'ideas are'} kept on this device.
-				<a href="/capture">Continue a draft</a>
+				<a href="/capture/drafts">Continue a draft</a>
 			</p>{/if}
 	</aside>
 {/if}

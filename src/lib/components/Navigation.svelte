@@ -46,7 +46,7 @@
 						>Catalogue</a
 					>{/if}
 				{#if contributes}<a class:active={page.url.pathname === '/inbox'} href="/inbox">Inbox</a><a
-						class:active={page.url.pathname === '/capture'}
+						class:active={page.url.pathname.startsWith('/capture')}
 						href="/capture">Add idea</a
 					>{/if}
 				{#if person.administrator}<a

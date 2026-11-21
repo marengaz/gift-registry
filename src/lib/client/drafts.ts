@@ -193,6 +193,39 @@ export class DraftStore extends Dexie {
 				: undefined;
 		});
 	}
+	async attachThumbnail(id: string, ownerId: string | null, file: File): Promise<boolean> {
+		return this.transaction('rw', this.drafts, this.blobs, this.context, async () => {
+			const active = await this.current();
+			if (active && (active.logoutUntil ?? 0) > Date.now()) return false;
+			const record = await this.get(id, ownerId);
+			if (
+				!record ||
+				record.attemptedAt ||
+				record.status === 'saved' ||
+				record.editorToken ||
+				(record.leaseUntil ?? 0) > Date.now()
+			)
+				return false;
+			const existingCount = await this.blobs.where('draftId').equals(id).count();
+			if (existingCount > 0) return false;
+			const updatedDraft = copy(record.draft);
+			if (updatedDraft.browserCapture) updatedDraft.browserCapture.imageUrl = '';
+			await this.drafts.put({
+				...record,
+				draft: updatedDraft,
+				updatedAt: Date.now()
+			});
+			await this.blobs.put({
+				draftId: id,
+				position: 0,
+				blob: file.slice(0, file.size, file.type),
+				name: file.name,
+				type: file.type,
+				lastModified: file.lastModified
+			});
+			return true;
+		});
+	}
 	async beginIdentityRefresh() {
 		return this.transaction('rw', this.identity, async () => {
 			const generation = ((await this.identity.get('generation'))?.generation ?? 0) + 1;

@@ -887,7 +887,10 @@
 		</p>{/if}
 	{#if storage}<p class="muted storage-note">{storage}</p>{/if}
 	{#if records.length || imports.length}<section class="panel">
-			<h2>Drafts on this device</h2>
+			<div class="drafts-panel-header">
+				<h2>Drafts on this device</h2>
+				<a href="/capture/drafts">Review &amp; prune all drafts</a>
+			</div>
 			<ul class="draft-list">
 				{#each [...records, ...imports] as record (record.id)}<li>
 						<DraftPreview {record} />
@@ -904,6 +907,17 @@
 <style>
 	.storage-note {
 		font-size: 0.85rem;
+	}
+	.drafts-panel-header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 1rem;
+		flex-wrap: wrap;
+		margin-bottom: 0.8rem;
+	}
+	.drafts-panel-header h2 {
+		margin: 0;
 	}
 	.draft-list {
 		padding: 0;
