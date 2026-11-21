@@ -256,7 +256,16 @@ export function extractAmazonWishlistPage(
 		showMoreInput.attr('data-awl-ajax-url') ||
 		$('a[href*="lek="]').first().attr('href') ||
 		'';
-	if (rawMore) moreUrl = evidenceUrl(rawMore, pageUrl);
+	if (rawMore) {
+		const candidateMore = evidenceUrl(rawMore, pageUrl);
+		if (
+			candidateMore &&
+			isAmazonHost(candidateMore) &&
+			new URL(candidateMore).origin === parsedUrl.origin
+		) {
+			moreUrl = candidateMore;
+		}
+	}
 
 	let storefrontPagination: {
 		vanityHandle: string;
@@ -407,6 +416,7 @@ export function wishlistPreview(
 		requireMember(connection, event.locals.actor);
 
 		if (
+			!isAmazonHost(firstPage.url) ||
 			!String(firstPage.headers['content-type'] ?? '')
 				.toLowerCase()
 				.includes('text/html')
@@ -464,7 +474,7 @@ export function wishlistPreview(
 				} catch {
 					break;
 				}
-			} else if (moreUrl) {
+			} else if (moreUrl && isAmazonHost(moreUrl) && new URL(moreUrl).origin === origin) {
 				const cookieHeader = formatCookieHeader(cookieJar);
 				try {
 					const nextResponse = await fetchPage(moreUrl, {
@@ -474,6 +484,7 @@ export function wishlistPreview(
 							'X-Requested-With': 'XMLHttpRequest'
 						}
 					});
+					if (!isAmazonHost(nextResponse.url) || new URL(nextResponse.url).origin !== origin) break;
 					mergeCookieJar(cookieJar, extractCookies(nextResponse.headers));
 					const nextParsed = extractAmazonWishlistPage(
 						nextResponse.body.toString('utf8'),

@@ -128,7 +128,7 @@ describe('Amazon wishlist preview & pagination integration', () => {
 		expect(calls[1].limits.headers?.Cookie).toContain('session-id=123-456');
 	});
 
-	it('rejects non-Amazon URLs and non-contributors', async () => {
+	it('rejects non-Amazon URLs, shortlinks redirecting to non-Amazon hosts, and non-contributors', async () => {
 		const model = fixture();
 		models.push(model);
 		const endpointUrl = new URL('https://gifts.example/api/wishlist');
@@ -143,6 +143,26 @@ describe('Amazon wishlist preview & pagination integration', () => {
 			locals: { actor: model.admin }
 		});
 		expect(nonAmazon.status).toBe(400);
+
+		const maliciousShortlink = await wishlistPreview(
+			model.connection,
+			{
+				url: endpointUrl,
+				request: new Request(endpointUrl, {
+					method: 'POST',
+					headers: { 'content-type': 'application/json', origin: 'https://gifts.example' },
+					body: JSON.stringify({ url: 'https://a.co/d/malicious' })
+				}),
+				locals: { actor: model.admin }
+			},
+			async () => ({
+				status: 200,
+				url: 'https://evil.example/fake-wishlist',
+				headers: { 'content-type': 'text/html' },
+				body: Buffer.from('<a href="/dp/B0DLY8GFR8">Item</a>')
+			})
+		);
+		expect(maliciousShortlink.status).toBe(400);
 
 		const uninvited = await wishlistPreview(model.connection, {
 			url: endpointUrl,

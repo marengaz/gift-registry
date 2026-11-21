@@ -52,6 +52,8 @@ export function draftFromWishlistItem(
 	return draft;
 }
 
+const inFlightThumbnails = new Map<string, Promise<boolean>>();
+
 export async function downloadDraftThumbnail(
 	record: LocalDraft,
 	store: DraftStore = draftStore,
@@ -60,37 +62,33 @@ export async function downloadDraftThumbnail(
 ): Promise<boolean> {
 	const imageUrl = record.draft.browserCapture?.imageUrl;
 	if (!imageUrl) return false;
-	try {
-		const existing = await store.firstPhoto(record.id, record.ownerId);
-		if (existing) return true;
-		const response = await transport('/api/metadata/image', {
-			method: 'POST',
-			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify({ url: imageUrl }),
-			signal: signal
-				? AbortSignal.any([signal, AbortSignal.timeout(12000)])
-				: AbortSignal.timeout(12000)
-		});
-		if (!response.ok) return false;
-		const blob = await response.blob();
-		const latest = await store.get(record.id, record.ownerId);
-		if (!latest || latest.attemptedAt || latest.status === 'saved' || latest.editorToken)
+	const dedupKey = `${store.name}:${record.id}`;
+	const existingTask = inFlightThumbnails.get(dedupKey);
+	if (existingTask) return existingTask;
+	const task = (async () => {
+		try {
+			const existing = await store.firstPhoto(record.id, record.ownerId);
+			if (existing) return true;
+			const response = await transport('/api/metadata/image', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ url: imageUrl }),
+				signal: signal
+					? AbortSignal.any([signal, AbortSignal.timeout(12000)])
+					: AbortSignal.timeout(12000)
+			});
+			if (!response.ok) return false;
+			const blob = await response.blob();
+			const file = new File([blob], 'wishlist-image.webp', { type: 'image/webp' });
+			return await store.attachThumbnail(record.id, record.ownerId, file);
+		} catch {
 			return false;
-		const file = new File([blob], 'wishlist-image.webp', { type: 'image/webp' });
-		const updatedDraft = JSON.parse(JSON.stringify(latest.draft)) as CaptureDraft;
-		if (updatedDraft.browserCapture) updatedDraft.browserCapture.imageUrl = '';
-		await store.save({
-			id: latest.id,
-			ownerId: latest.ownerId,
-			draft: updatedDraft,
-			photos: [file],
-			submit: latest.readyToSync ?? false,
-			incomingShare: latest.incomingShare
-		});
-		return true;
-	} catch {
-		return false;
-	}
+		} finally {
+			inFlightThumbnails.delete(dedupKey);
+		}
+	})();
+	inFlightThumbnails.set(dedupKey, task);
+	return task;
 }
 
 export async function ingestAmazonWishlist(options: {

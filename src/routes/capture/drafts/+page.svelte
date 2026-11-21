@@ -11,7 +11,9 @@
 		type CaptureContext,
 		type LocalDraft
 	} from '#lib/client/drafts.ts';
+	import { registerCapturePreparation } from '#lib/client/capture-session.ts';
 	import { refreshCaptureIdentity, syncDrafts } from '#lib/client/sync.ts';
+	import { downloadDraftThumbnail } from '#lib/client/wishlist-import.ts';
 
 	let context = $state<CaptureContext | undefined>();
 	let records = $state<LocalDraft[]>([]);
@@ -51,9 +53,20 @@
 		});
 	});
 
-	const selectableDrafts = $derived(
-		visibleDrafts.filter((record) => (record.leaseUntil ?? 0) <= Date.now())
-	);
+	function isLeased(record: LocalDraft): boolean {
+		return (record.leaseUntil ?? 0) > Date.now();
+	}
+
+	function sourceHostname(rawUrl: string): string | null {
+		const trimmed = rawUrl.trim();
+		if (!trimmed || !URL.canParse(trimmed)) return null;
+		const parsed = new URL(trimmed);
+		if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password)
+			return null;
+		return parsed.hostname.replace(/^www\./, '');
+	}
+
+	const selectableDrafts = $derived(visibleDrafts.filter((record) => !isLeased(record)));
 
 	const allSelected = $derived(
 		selectableDrafts.length > 0 &&
@@ -116,7 +129,8 @@
 	}
 
 	async function pruneDraft(record: LocalDraft) {
-		if (busy) return;
+		if (busy || isLeased(record)) return;
+		busy = true;
 		error = '';
 		message = '';
 		try {
@@ -128,6 +142,8 @@
 				reason instanceof Error
 					? reason.message
 					: 'This draft could not be pruned while synchronisation is running.';
+		} finally {
+			busy = false;
 		}
 	}
 
@@ -137,7 +153,9 @@
 		error = '';
 		message = '';
 		try {
-			const targets = activeDrafts.filter((record) => selectedIds.includes(record.id));
+			const targets = activeDrafts.filter(
+				(record) => selectedIds.includes(record.id) && !isLeased(record)
+			);
 			for (const record of targets) {
 				await draftStore.discard(record.ownerId, record.id);
 			}
@@ -174,13 +192,22 @@
 				);
 			}
 
-			for (const record of targets) {
-				let currentRecord = record;
+			for (const snapshot of targets) {
+				let currentRecord: LocalDraft | undefined =
+					(await draftStore.get(snapshot.id, snapshot.ownerId)) ??
+					(await draftStore.get(snapshot.id, ownerId)) ??
+					(await draftStore.get(snapshot.id, null));
+				if (!currentRecord) continue;
 				if (!currentRecord.ownerId && person) {
 					currentRecord = await draftStore.adopt(currentRecord.id, person);
 				}
 				if (currentRecord.ownerId !== ownerId) continue;
 				if (currentRecord.attemptedAt || currentRecord.status === 'saved') continue;
+
+				if (currentRecord.draft.browserCapture?.imageUrl && navigator.onLine) {
+					await downloadDraftThumbnail(currentRecord, draftStore, fetch);
+					currentRecord = (await draftStore.get(currentRecord.id, ownerId)) ?? currentRecord;
+				}
 
 				const files = await draftStore.files(currentRecord.id, currentRecord.ownerId);
 				const updatedDraft = JSON.parse(JSON.stringify(currentRecord.draft));
@@ -230,7 +257,15 @@
 		}
 	}
 
+	async function prepareSignOut() {
+		if (loading || busy) {
+			throw new Error('Finish pruning or adding your local draft ideas before signing out.');
+		}
+		return async () => {};
+	}
+
 	onMount(() => {
+		const unregisterPreparation = registerCapturePreparation(prepareSignOut);
 		const subscription = liveQuery(async () => {
 			const active = await draftStore.current();
 			return {
@@ -260,6 +295,7 @@
 			void refreshCaptureIdentity().catch(() => {});
 		}
 		return () => {
+			unregisterPreparation();
 			subscription.unsubscribe();
 		};
 	});
@@ -434,13 +470,15 @@
 				{@const title = captureTitle(record.draft)}
 				{@const price = draftPriceLabel(record)}
 				{@const selected = selectedIds.includes(record.id)}
+				{@const leased = isLeased(record)}
+				{@const host = sourceHostname(record.draft.sourceUrl)}
 				<article class="product-card compact draft-compact-row" role="listitem">
 					<div class="draft-select-cell">
 						<input
 							type="checkbox"
 							aria-label={`Select ${title}`}
 							checked={selected}
-							disabled={busy}
+							disabled={busy || leased}
 							onchange={() => toggleSelection(record.id)}
 						/>
 					</div>
@@ -454,14 +492,14 @@
 							</a>
 							<div class="draft-meta">
 								<span class="badge">{statusLabel(record)}</span>
-								{#if record.draft.sourceUrl}
+								{#if host}
 									<a
 										class="source-link"
-										href={record.draft.sourceUrl}
+										href={record.draft.sourceUrl.trim()}
 										target="_blank"
 										rel="noopener noreferrer"
 									>
-										{new URL(record.draft.sourceUrl).hostname.replace(/^www\./, '')} ↗
+										{host} ↗
 									</a>
 								{/if}
 								{#if record.message}
@@ -477,7 +515,7 @@
 							<button
 								type="button"
 								class="secondary prune-button"
-								disabled={busy}
+								disabled={busy || leased}
 								aria-label={`Prune ${title}`}
 								onclick={() => pruneDraft(record)}
 							>

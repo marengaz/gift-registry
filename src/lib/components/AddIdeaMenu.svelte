@@ -1,13 +1,15 @@
 <script lang="ts">
-	import { tick } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { containDialogFocus } from '#lib/dialog-focus.ts';
+	import { registerCapturePreparation } from '#lib/client/capture-session.ts';
 	import {
 		ingestAmazonWishlist,
 		type WishlistIngestProgress
 	} from '#lib/client/wishlist-import.ts';
 
 	let menuEl: HTMLDetailsElement | undefined = $state();
+	let summaryEl: HTMLElement | undefined = $state();
 	let dialogEl: HTMLDialogElement | undefined = $state();
 	let urlInputEl: HTMLInputElement | undefined = $state();
 
@@ -26,6 +28,34 @@
 			dialogEl.close();
 		}
 	});
+
+	onMount(() => {
+		const unregisterPreparation = registerCapturePreparation(async () => {
+			if (busy) {
+				throw new Error('Wait for the Amazon wishlist import to finish before signing out.');
+			}
+			return async () => {};
+		});
+		const handlePointerDown = (event: MouseEvent) => {
+			if (menuEl?.open && event.target instanceof Node && !menuEl.contains(event.target)) {
+				menuEl.removeAttribute('open');
+			}
+		};
+		window.addEventListener('pointerdown', handlePointerDown);
+		return () => {
+			unregisterPreparation();
+			window.removeEventListener('pointerdown', handlePointerDown);
+		};
+	});
+
+	function handleMenuKeydown(event: KeyboardEvent) {
+		if (event.key === 'Escape' && menuEl?.open) {
+			event.preventDefault();
+			event.stopPropagation();
+			menuEl.removeAttribute('open');
+			summaryEl?.focus();
+		}
+	}
 
 	function openWishlistDialog() {
 		menuEl?.removeAttribute('open');
@@ -94,8 +124,11 @@
 
 <div class="add-idea-split" role="group" aria-label="Add idea options">
 	<a class="button split-primary" href="/capture">+ Add an idea</a>
-	<details class="split-menu" bind:this={menuEl}>
-		<summary class="button split-toggle" aria-label="More ways to add ideas">▾</summary>
+	<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+	<details class="split-menu" bind:this={menuEl} onkeydown={handleMenuKeydown}>
+		<summary class="button split-toggle" bind:this={summaryEl} aria-label="More ways to add ideas"
+			>▾</summary
+		>
 		<div class="split-dropdown" role="menu">
 			<a
 				role="menuitem"
