@@ -216,4 +216,41 @@ describe('quidco cashback matching and formatting', () => {
 		expect(disabled.searchUrl).toBe('https://www.quidco.com/search/?q=boots');
 		expect(fetchMock).not.toHaveBeenCalled();
 	});
+
+	it('falls back to default Quidco URL when catalogUrl is blank', async () => {
+		const fetchMock = vi
+			.fn<typeof fetch>()
+			.mockResolvedValue(new Response(JSON.stringify(sampleCatalogPayload), { status: 200 }));
+		const result = await lookupQuidcoCashback('https://www.boots.com/item', {
+			catalogUrl: '   ',
+			fetchImpl: fetchMock
+		});
+		expect(result.cashback).toBe('Quidco: Up to 3.75% cashback');
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+		expect(fetchMock.mock.calls[0]?.[0]).toBe(
+			'https://tbd.cashbacksrv.com/quidco_com/p/merchants.json'
+		);
+	});
+
+	it('aborts streaming catalog responses that exceed the 20 MB cap', async () => {
+		let cancelled = false;
+		const oversizedStream = new ReadableStream<Uint8Array>({
+			pull(controller) {
+				controller.enqueue(new Uint8Array(5 * 1024 * 1024));
+			},
+			cancel() {
+				cancelled = true;
+			}
+		});
+		const fetchMock = vi
+			.fn<typeof fetch>()
+			.mockResolvedValue(new Response(oversizedStream, { status: 200 }));
+		const result = await lookupQuidcoCashback('https://www.boots.com/item', {
+			catalogUrl: 'https://example.test/huge.json',
+			fetchImpl: fetchMock
+		});
+		expect(result.available).toBe(false);
+		expect(result.cashback).toBeNull();
+		expect(cancelled).toBe(true);
+	});
 });

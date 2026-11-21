@@ -158,6 +158,10 @@ test('auto-populates Quidco cashback when a merchant link is entered and allows 
 	await linkInput.fill('https://www.currys.co.uk/camera');
 	await page.waitForTimeout(700);
 	await expect(couponInput).toHaveValue('SPRING20');
+	await expect(page.getByRole('link', { name: 'Check Quidco ↗' })).toHaveAttribute(
+		'href',
+		'https://www.quidco.com/search/?q=currys'
+	);
 
 	await titleInput.fill('Instant camera');
 	await page.getByRole('checkbox', { name: /Child · Birthday/ }).check();
@@ -166,13 +170,23 @@ test('auto-populates Quidco cashback when a merchant link is entered and allows 
 	await page.getByRole('link', { name: 'View idea' }).click();
 	await expect(page.getByText('SPRING20')).toBeVisible();
 
-	// 3. Editing preserves existing manual voucher code and allows updating
+	// 3. Editing preserves existing manual voucher code, allows clearing, and does not refill cleared code
 	await page.getByRole('button', { name: 'Edit idea' }).click();
 	await page.waitForTimeout(700);
 	await expect(page.getByLabel('Coupon or cashback code')).toHaveValue('SPRING20');
 	await page.getByLabel('Coupon or cashback code').fill('SUMMER25');
 	await page.getByRole('button', { name: 'Save changes' }).click();
 	await expect(page.getByText('SUMMER25')).toBeVisible();
+
+	await page.getByRole('button', { name: 'Edit idea' }).click();
+	await page.getByLabel('Coupon or cashback code').fill('');
+	await page.getByRole('button', { name: 'Save changes' }).click();
+	await expect(page.getByText('Coupon / cashback:')).toHaveCount(0);
+
+	// Reopening edit on an idea with a Quidco sourceUrl and empty couponCode must NOT silently refill it
+	await page.getByRole('button', { name: 'Edit idea' }).click();
+	await page.waitForTimeout(700);
+	await expect(page.getByLabel('Coupon or cashback code')).toHaveValue('');
 
 	// 4. Without a link, no Quidco lookup is attempted
 	let quidcoRequests = 0;

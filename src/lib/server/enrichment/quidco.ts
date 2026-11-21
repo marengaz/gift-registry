@@ -184,6 +184,33 @@ export function matchQuidcoMerchant(rawUrl: string, catalog: QuidcoCatalog): Qui
 	return best;
 }
 
+async function readResponseTextWithLimit(response: Response, maxBytes: number): Promise<string> {
+	if (!response.body) {
+		const text = await response.text();
+		if (Buffer.byteLength(text, 'utf8') > maxBytes) throw new Error('Quidco catalog too large');
+		return text;
+	}
+	const reader = response.body.getReader();
+	const chunks: Uint8Array[] = [];
+	let totalBytes = 0;
+	try {
+		while (true) {
+			const { done, value } = await reader.read();
+			if (done) break;
+			if (!value) continue;
+			totalBytes += value.byteLength;
+			if (totalBytes > maxBytes) {
+				await reader.cancel().catch(() => {});
+				throw new Error('Quidco catalog too large');
+			}
+			chunks.push(value);
+		}
+	} finally {
+		reader.releaseLock();
+	}
+	return Buffer.concat(chunks).toString('utf8');
+}
+
 async function fetchCatalog(
 	sourceUrl: string,
 	fetchImpl: typeof fetch,
@@ -199,10 +226,12 @@ async function fetchCatalog(
 			inFlight: null
 		};
 	}
+	const activeCache = cache;
 	const timestamp = now();
-	if (cache.catalog && timestamp - cache.fetchedAt < CATALOG_TTL_MS) return cache.catalog;
-	if (timestamp < cache.failedUntil) return cache.catalog;
-	if (cache.inFlight) return cache.inFlight;
+	if (activeCache.catalog && timestamp - activeCache.fetchedAt < CATALOG_TTL_MS)
+		return activeCache.catalog;
+	if (timestamp < activeCache.failedUntil) return activeCache.catalog;
+	if (activeCache.inFlight) return activeCache.inFlight;
 
 	const request = (async () => {
 		try {
@@ -210,46 +239,44 @@ async function fetchCatalog(
 				Accept: 'application/json',
 				'User-Agent': 'FamilyGiftCatalogue/1.0'
 			};
-			if (cache.etag && cache.catalog) headers['If-None-Match'] = cache.etag;
+			if (activeCache.etag && activeCache.catalog) headers['If-None-Match'] = activeCache.etag;
 			const response = await fetchImpl(sourceUrl, {
 				method: 'GET',
 				headers,
 				signal: AbortSignal.timeout(FETCH_TIMEOUT_MS)
 			});
-			if (response.status === 304 && cache.catalog) {
-				cache.fetchedAt = now();
-				cache.failedUntil = 0;
-				return cache.catalog;
+			if (cache !== activeCache) return null;
+			if (response.status === 304 && activeCache.catalog) {
+				activeCache.fetchedAt = now();
+				activeCache.failedUntil = 0;
+				return activeCache.catalog;
 			}
 			if (!response.ok) {
-				cache.failedUntil = now() + FAILURE_BACKOFF_MS;
-				return cache.catalog;
+				activeCache.failedUntil = now() + FAILURE_BACKOFF_MS;
+				return activeCache.catalog;
 			}
 			const declaredLength = Number(response.headers.get('content-length') ?? '0');
 			if (declaredLength > MAX_CATALOG_BYTES) {
-				cache.failedUntil = now() + FAILURE_BACKOFF_MS;
-				return cache.catalog;
+				activeCache.failedUntil = now() + FAILURE_BACKOFF_MS;
+				return activeCache.catalog;
 			}
-			const text = await response.text();
-			if (Buffer.byteLength(text, 'utf8') > MAX_CATALOG_BYTES) {
-				cache.failedUntil = now() + FAILURE_BACKOFF_MS;
-				return cache.catalog;
-			}
+			const text = await readResponseTextWithLimit(response, MAX_CATALOG_BYTES);
+			if (cache !== activeCache) return null;
 			const parsed = parseQuidcoCatalog(JSON.parse(text));
-			cache.catalog = parsed;
-			cache.etag = response.headers.get('etag');
-			cache.fetchedAt = now();
-			cache.failedUntil = 0;
+			activeCache.catalog = parsed;
+			activeCache.etag = response.headers.get('etag');
+			activeCache.fetchedAt = now();
+			activeCache.failedUntil = 0;
 			return parsed;
 		} catch {
-			cache.failedUntil = now() + FAILURE_BACKOFF_MS;
-			return cache.catalog;
+			if (cache === activeCache) activeCache.failedUntil = now() + FAILURE_BACKOFF_MS;
+			return activeCache.catalog;
 		} finally {
-			cache.inFlight = null;
+			if (cache === activeCache) activeCache.inFlight = null;
 		}
 	})();
 
-	cache.inFlight = request;
+	activeCache.inFlight = request;
 	return request;
 }
 
@@ -267,9 +294,8 @@ export async function lookupQuidcoCashback(
 			available: true
 		};
 	}
-	const configuredUrl =
-		options.catalogUrl ?? process.env.QUIDCO_MERCHANTS_URL ?? DEFAULT_QUIDCO_MERCHANTS_URL;
-	if (!configuredUrl || configuredUrl.toLowerCase() === 'disabled') {
+	const rawConfigured = (options.catalogUrl ?? process.env.QUIDCO_MERCHANTS_URL ?? '').trim();
+	if (rawConfigured.toLowerCase() === 'disabled') {
 		return {
 			cashback: null,
 			merchantName: null,
@@ -278,6 +304,7 @@ export async function lookupQuidcoCashback(
 			available: false
 		};
 	}
+	const configuredUrl = rawConfigured || DEFAULT_QUIDCO_MERCHANTS_URL;
 	const catalog = await fetchCatalog(
 		configuredUrl,
 		options.fetchImpl ?? fetch,

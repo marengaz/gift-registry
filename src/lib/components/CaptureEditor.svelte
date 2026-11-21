@@ -43,12 +43,14 @@
 		onSave: () => void;
 		onListsChanged?: () => void;
 	} = $props();
+	const componentId = $props.id();
+	const couponHelpId = `${componentId}-coupon-help`;
 	let online = $state(true);
 	let validation = $state('');
 	let showText = $state(false);
 	let listSearch = $state('');
 	let quidcoBusy = $state(false);
-	let quidcoInfo = $state<QuidcoInfo | null>(null);
+	let quidcoInfo = $state<(QuidcoInfo & { url: string }) | null>(null);
 	let autoPopulatedCoupon = $state<string | null>(null);
 	let renderedDraft: CaptureDraft | undefined;
 	let lastQuidcoDraft: CaptureDraft | undefined;
@@ -65,6 +67,9 @@
 			? 'Each photo must be 12 MB or smaller. Remove the large photo or choose a smaller copy.'
 			: ''
 	);
+	const activeQuidcoInfo = $derived(
+		quidcoInfo && quidcoInfo.url === draft.sourceUrl.trim() ? quidcoInfo : null
+	);
 	const quidcoFallbackSearchUrl = $derived.by(() => {
 		const raw = draft.sourceUrl.trim();
 		if (!raw || !URL.canParse(raw)) return null;
@@ -75,7 +80,14 @@
 			.replace(/^\[|\]$/g, '')
 			.toLowerCase()
 			.replace(/^www\d*\./, '');
-		if (!host || host === 'localhost' || host.endsWith('.localhost') || !host.includes('.'))
+		if (
+			!host ||
+			host === 'localhost' ||
+			host.endsWith('.localhost') ||
+			!host.includes('.') ||
+			/^\d+(\.\d+){3}$/.test(host) ||
+			host.includes(':')
+		)
 			return null;
 		const query = host
 			.replace(/\.(co|org|me|ltd|plc)\.uk$/, '')
@@ -95,8 +107,9 @@
 			quidcoBusy = false;
 			quidcoInfo = null;
 			autoPopulatedCoupon = null;
-			lastQuidcoDraft = undefined;
-			lastQuidcoUrl = '';
+			// When editing an existing idea, never silently populate couponCode until sourceUrl changes.
+			lastQuidcoDraft = editing ? next : undefined;
+			lastQuidcoUrl = editing ? next.sourceUrl.trim() : '';
 		});
 	});
 	$effect(() => {
@@ -119,7 +132,14 @@
 			});
 			return;
 		}
-		if (locked || !online || manuallyEdited) return;
+		if (locked || !online || manuallyEdited || (localCapture && !canSynchronise)) {
+			untrack(() => {
+				quidcoController?.abort();
+				quidcoController = undefined;
+				quidcoBusy = false;
+			});
+			return;
+		}
 		if (lastQuidcoDraft === draft && lastQuidcoUrl === url) return;
 		const requestedDraft = draft;
 		const timer = setTimeout(() => {
@@ -128,6 +148,8 @@
 					draft !== requestedDraft ||
 					draft.sourceUrl.trim() !== url ||
 					locked ||
+					!online ||
+					(localCapture && !canSynchronise) ||
 					draft.editedFields?.includes('couponCode')
 				)
 					return;
@@ -153,7 +175,7 @@
 							return;
 						lastQuidcoDraft = draft;
 						lastQuidcoUrl = url;
-						quidcoInfo = result;
+						quidcoInfo = result ? { ...result, url } : null;
 						if (draft.editedFields?.includes('couponCode')) return;
 						if (result?.cashback) {
 							draft.couponCode = result.cashback;
@@ -334,32 +356,35 @@
 			/>
 			{#if editing}<small>Edit prices beside each selected list below.</small>{/if}
 		</label>
-		<label
-			>Coupon or cashback code <input
-				type="text"
-				maxlength="255"
-				bind:value={draft.couponCode}
-				oninput={() => {
-					markEdited(draft, 'couponCode');
-					autoPopulatedCoupon = null;
-				}}
-				placeholder="Voucher code or Quidco cashback"
-			/>
-			<small>
-				{#if quidcoBusy}Checking Quidco cashback…{:else if autoPopulatedCoupon && draft.couponCode === autoPopulatedCoupon && quidcoInfo?.merchantName}Auto-filled
-					from Quidco for {quidcoInfo.merchantName}. Type to replace with a voucher code.{#if quidcoInfo.quidcoUrl}{' '}<a
-							href={quidcoInfo.quidcoUrl}
+		<div class="coupon-field">
+			<label
+				>Coupon or cashback code <input
+					type="text"
+					maxlength="255"
+					aria-describedby={couponHelpId}
+					bind:value={draft.couponCode}
+					oninput={() => {
+						markEdited(draft, 'couponCode');
+						autoPopulatedCoupon = null;
+					}}
+					placeholder="Voucher code or Quidco cashback"
+				/></label
+			>
+			<small id={couponHelpId} class="coupon-help">
+				{#if quidcoBusy}Checking Quidco cashback…{:else if autoPopulatedCoupon && draft.couponCode === autoPopulatedCoupon && activeQuidcoInfo?.merchantName}Auto-filled
+					from Quidco for {activeQuidcoInfo.merchantName}. Type to replace with a voucher code.{#if activeQuidcoInfo.quidcoUrl}{' '}<a
+							href={activeQuidcoInfo.quidcoUrl}
 							target="_blank"
 							rel="noopener noreferrer">View on Quidco ↗</a
-						>{/if}{:else if quidcoInfo?.searchUrl || quidcoFallbackSearchUrl}Optional — up to 255
-					characters. <a
-						href={quidcoInfo?.searchUrl ?? quidcoFallbackSearchUrl}
+						>{/if}{:else if activeQuidcoInfo?.searchUrl || quidcoFallbackSearchUrl}Optional — up to
+					255 characters. <a
+						href={activeQuidcoInfo?.searchUrl ?? quidcoFallbackSearchUrl}
 						target="_blank"
 						rel="noopener noreferrer">Check Quidco ↗</a
 					>{:else}Optional — up to 255 characters. Add a shop URL above to check Quidco cashback
 					automatically.{/if}
 			</small>
-		</label>
+		</div>
 		<fieldset class="list-selection">
 			<legend>Choose lists</legend>
 			{#if lists.length > 6}<label
@@ -518,6 +543,12 @@
 	}
 	.draft-fields:disabled {
 		opacity: 0.7;
+	}
+	.coupon-field {
+		margin: 0.85rem 0;
+	}
+	.coupon-field label {
+		margin: 0 0 0.35rem;
 	}
 	.list-selection {
 		margin: 1.4rem 0;
