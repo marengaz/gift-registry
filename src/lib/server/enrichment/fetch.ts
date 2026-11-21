@@ -6,7 +6,13 @@ import ipaddr from 'ipaddr.js';
 export class PublicFetchError extends Error {}
 
 export type Address = { address: string; family: number };
-export type FetchLimits = { maxBytes: number; timeoutMs: number };
+export type FetchLimits = {
+	maxBytes: number;
+	timeoutMs: number;
+	method?: 'GET' | 'POST';
+	headers?: Record<string, string>;
+	body?: string | Buffer;
+};
 export type FetchResponse = { status: number; headers: IncomingHttpHeaders; body: Buffer };
 export type PublicFetchDependencies = {
 	resolve: (hostname: string) => Promise<Address[]>;
@@ -51,13 +57,14 @@ export function pinnedRequest(
 			else resolve(value!);
 		};
 		const options: RequestOptions = {
-			method: 'GET',
+			method: limits.method ?? 'GET',
 			agent: false,
 			servername: url.hostname.replace(/^\[|\]$/g, ''),
 			headers: {
 				'User-Agent': 'FamilyGiftCatalogue/1.0',
 				Accept: 'text/html,image/*;q=0.8',
-				'Accept-Encoding': 'identity'
+				'Accept-Encoding': 'identity',
+				...limits.headers
 			},
 			lookup: (_hostname, options, callback) => {
 				// The selected address is never resolved again when opening the socket.
@@ -107,7 +114,8 @@ export function pinnedRequest(
 				);
 			});
 			request.on('error', (error) => finish(error));
-			request.end();
+			if (limits.body !== undefined) request.end(limits.body);
+			else request.end();
 		} catch (error) {
 			finish(
 				error instanceof Error
@@ -126,9 +134,12 @@ export async function publicFetch(
 	limits: Partial<FetchLimits> = {},
 	dependencies: PublicFetchDependencies = defaults
 ): Promise<FetchResponse & { url: string }> {
-	const bounds = {
+	const bounds: FetchLimits = {
 		maxBytes: limits.maxBytes ?? 8 * 1024 * 1024,
-		timeoutMs: limits.timeoutMs ?? 10000
+		timeoutMs: limits.timeoutMs ?? 10000,
+		...(limits.method ? { method: limits.method } : {}),
+		...(limits.headers ? { headers: limits.headers } : {}),
+		...(limits.body !== undefined ? { body: limits.body } : {})
 	};
 	const started = Date.now();
 	let url = publicUrl(value);
