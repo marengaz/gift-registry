@@ -166,16 +166,16 @@ describe('coupon code persistence, validation, migration, and Quidco API', () =>
 			);
 			expect(guest.status).toBe(403);
 
-			// Contributor gets Quidco cashback when feed responds 200
+			// Contributor gets Quidco cashback when feed responds 200 (supports ?domain= and ?url=)
 			const fetchOk = vi.fn<typeof fetch>().mockResolvedValue(
 				new Response(
 					JSON.stringify({
 						merchants: [
 							{
-								name: 'Boots',
-								domain: 'boots.com',
-								reward: 'Up to 3.75% cashback',
-								url: 'https://www.quidco.com/boots/'
+								name: 'Currys',
+								domain: 'currys.co.uk',
+								reward: 'Up to 15% cashback',
+								url: 'https://www.quidco.com/currys/'
 							}
 						]
 					}),
@@ -184,15 +184,16 @@ describe('coupon code persistence, validation, migration, and Quidco API', () =>
 			);
 			const okRes = await quidcoLookup(
 				context.connection,
-				jsonEvent(context.admin, '/api/quidco?url=https://www.boots.com/item', 'GET'),
+				jsonEvent(context.admin, '/api/quidco?domain=currys.co.uk', 'GET'),
 				{ catalogUrl: 'https://example.test/quidco.json', fetchImpl: fetchOk }
 			);
 			expect(okRes.status).toBe(200);
 			expect(await okRes.json()).toEqual({
-				cashback: 'Quidco: Up to 3.75% cashback',
-				merchantName: 'Boots',
-				quidcoUrl: 'https://www.quidco.com/boots/',
-				searchUrl: 'https://www.quidco.com/search/?q=boots',
+				domain: 'currys.co.uk',
+				cashback: 'Quidco: Up to 15% cashback',
+				merchantName: 'Currys',
+				quidcoUrl: 'https://www.quidco.com/currys/',
+				searchUrl: 'https://www.quidco.com/search/?q=currys',
 				available: true
 			});
 
@@ -203,15 +204,20 @@ describe('coupon code persistence, validation, migration, and Quidco API', () =>
 				.mockResolvedValue(new Response('Forbidden', { status: 403 }));
 			const blockedRes = await quidcoLookup(
 				context.connection,
-				jsonEvent(context.admin, '/api/quidco?url=https://www.boots.com/item', 'GET'),
+				jsonEvent(
+					context.admin,
+					'/api/quidco?url=https://www.currys.co.uk/products/samsung-galaxy-watch8-bt-with-bixby-graphite-40-mm-10286746.html',
+					'GET'
+				),
 				{ catalogUrl: 'https://example.test/blocked.json', fetchImpl: fetchBlocked }
 			);
 			expect(blockedRes.status).toBe(200);
 			expect(await blockedRes.json()).toEqual({
+				domain: 'currys.co.uk',
 				cashback: null,
 				merchantName: null,
 				quidcoUrl: null,
-				searchUrl: 'https://www.quidco.com/search/?q=boots',
+				searchUrl: 'https://www.quidco.com/search/?q=currys',
 				available: false
 			});
 		} finally {
