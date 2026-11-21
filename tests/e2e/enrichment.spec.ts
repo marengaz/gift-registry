@@ -309,7 +309,15 @@ test('crops a screenshot locally, fills on request and preserves deliberate edit
 		await page.getByText('More details', { exact: true }).click();
 		await expect(page.getByLabel('Variant or size')).toHaveValue('Blue');
 		await page.getByLabel('Estimated price (£)', { exact: true }).fill('35.00');
-		await page.getByRole('button', { name: 'Undo autofill', exact: true }).click();
+		const undoAutofill = page.getByRole('button', { name: 'Undo autofill', exact: true });
+		const [currentPhotosBox, undoBox] = await Promise.all([
+			photosInput.boundingBox(),
+			undoAutofill.boundingBox()
+		]);
+		expect(currentPhotosBox).not.toBeNull();
+		expect(undoBox).not.toBeNull();
+		expect(undoBox!.y).toBeGreaterThan(currentPhotosBox!.y);
+		await undoAutofill.click();
 		await expect(page.getByLabel('Variant or size')).toHaveValue('');
 		await expect(page.getByLabel('Estimated price (£)', { exact: true })).toHaveValue('35.00');
 		await expect(page.getByLabel('Title', { exact: true })).toHaveValue('Console for Luke');
@@ -404,7 +412,13 @@ for (const kind of ['text', 'image'] as const) {
 		try {
 			await page.goto(origin + '/capture');
 			if (kind === 'text') {
-				await page.getByRole('button', { name: 'Paste text', exact: true }).click();
+				const pasteText = page.getByRole('button', { name: 'Paste text', exact: true });
+				await expect(pasteText).toHaveAttribute('aria-expanded', 'false');
+				await pasteText.click();
+				await expect(pasteText).toHaveAttribute('aria-expanded', 'true');
+				await expect(
+					page.getByText('Using Fill from text sends this text to Google.', { exact: true })
+				).toBeVisible();
 				await page.getByLabel('Text to read', { exact: true }).fill('A wooden train to remember.');
 			} else {
 				const buffer = await sharp({

@@ -30,7 +30,9 @@
 	let allowAI = $state(true);
 	let ai = $state({ configured: false, enabled: false });
 	let selectedImage = $state(0);
-	let feedbackArea = $state<'link' | 'image'>('link');
+	let messageArea = $state<'link' | 'image'>('link');
+	let patchArea = $state<'link' | 'image'>('link');
+	let choicesArea = $state<'link' | 'image'>('link');
 	let choices = $state<ProductSuggestion[]>([]);
 	let duplicates = $state<{ id: string; title: string }[]>([]);
 	let duplicatesDismissed = $state(false);
@@ -57,7 +59,9 @@
 			photoBusy ||
 			!!photoMessage ||
 			(!!draft.browserCapture?.imageUrl && !photos.length) ||
-			(feedbackArea === 'image' && (!!message || hasUndo || hasChoices))
+			(messageArea === 'image' && !!message) ||
+			(patchArea === 'image' && hasUndo) ||
+			(choicesArea === 'image' && hasChoices)
 	);
 	$effect(() => {
 		const next = draft;
@@ -73,7 +77,9 @@
 			message = '';
 			photoMessage = '';
 			blockedLink = false;
-			feedbackArea = 'link';
+			messageArea = 'link';
+			patchArea = 'link';
+			choicesArea = 'link';
 			choices = [];
 			duplicates = [];
 			duplicatesDismissed = false;
@@ -125,12 +131,19 @@
 		if (!draft.sourceText.includes(text))
 			draft.sourceText = [draft.sourceText, text].filter(Boolean).join('\n');
 	}
-	async function useCandidate(candidate: ProductSuggestion, current: () => boolean) {
+	async function useCandidate(
+		candidate: ProductSuggestion,
+		current: () => boolean,
+		area: 'link' | 'image'
+	) {
 		if (!current()) return;
 		const generation = ++autofillGeneration;
+		blockedLink = false;
 		choices = [];
 		patch = applySuggestion(draft, candidate);
 		patchDraft = draft;
+		patchArea = area;
+		messageArea = area;
 		importedPhoto = undefined;
 		evidence(candidate);
 		message = [
@@ -173,6 +186,7 @@
 			if (importedPhoto && !draft.editedFields?.includes('photos'))
 				photos = photos.filter((photo) => photo !== importedPhoto);
 		}
+		messageArea = patchArea;
 		patch = null;
 		importedPhoto = undefined;
 		message = 'Autofill undone. Your edits and list choices are kept.';
@@ -192,7 +206,7 @@
 		const loadingMessage = 'Reading product details…';
 		busy = true;
 		blockedLink = false;
-		feedbackArea = 'link';
+		messageArea = 'link';
 		choices = [];
 		patch = null;
 		message = loadingMessage;
@@ -243,10 +257,11 @@
 			if (result.suggestions.length > 1) {
 				choicesDraft = draft;
 				choicesSource = draft.sourceUrl;
+				choicesArea = 'link';
 				choices = result.suggestions;
 				message = 'Which item? Choose the product you mean before filling its details.';
 			} else {
-				await useCandidate(result.suggestions[0], canApply);
+				await useCandidate(result.suggestions[0], canApply, 'link');
 				if (canApply() && result.aiUnavailable) message += ' ' + result.message;
 			}
 		} catch (error) {
@@ -269,8 +284,9 @@
 	}
 	async function fill(kind: 'image' | 'text') {
 		if (busy || disabled) return;
+		const area = kind === 'image' ? 'image' : 'link';
 		if (!navigator.onLine) {
-			feedbackArea = kind === 'image' ? 'image' : 'link';
+			messageArea = area;
 			message = 'Go online to fill details. Your idea can still be kept on this device.';
 			return;
 		}
@@ -301,7 +317,7 @@
 		const canApply = () => active() && sameTarget() && !disabled;
 		const loadingMessage = 'Reading the supplied ' + kind + '…';
 		busy = true;
-		feedbackArea = kind === 'image' ? 'image' : 'link';
+		messageArea = area;
 		choices = [];
 		patch = null;
 		message = loadingMessage;
@@ -338,12 +354,13 @@
 			if (result?.ambiguity || result?.suggestions?.length > 1) {
 				choicesDraft = draft;
 				choicesSource = draft.sourceUrl;
+				choicesArea = area;
 				choices = result.suggestions ?? [];
 				message =
 					'More than one item or price is visible. Crop the image to one product and try again, or choose an item below.';
 			} else if (result?.suggestions?.length) {
 				applied = true;
-				await useCandidate(result.suggestions[0], canApply);
+				await useCandidate(result.suggestions[0], canApply, area);
 			} else
 				message =
 					result?.message ||
@@ -469,7 +486,8 @@
 				onclick={() => {
 					void useCandidate(
 						candidate,
-						() => !disabled && draft === choicesDraft && draft.sourceUrl === choicesSource
+						() => !disabled && draft === choicesDraft && draft.sourceUrl === choicesSource,
+						choicesArea
 					);
 				}}>Use {candidate.title ?? 'this item'}</button
 			>{/each}
@@ -514,15 +532,15 @@
 				disabled={disabled || busy}
 				onclick={() => fill('text')}>Fill from text</button
 			>{/if}
-		{#if hasUndo && feedbackArea === 'link'}<button
+		{#if hasUndo && patchArea === 'link'}<button
 				type="button"
 				class="quiet"
 				{disabled}
 				onclick={undo}>Undo autofill</button
 			>{/if}
 	</div>
-	{#if feedbackArea === 'link' && message}<p class="muted" role="status">{message}</p>{/if}
-	{#if blockedLink}<div class="source-actions">
+	{#if messageArea === 'link' && message}<p class="muted" role="status">{message}</p>{/if}
+	{#if blockedLink && messageArea === 'link'}<div class="source-actions">
 			<label class="button secondary"
 				>Add screenshot<input
 					class="visually-hidden"
@@ -547,14 +565,14 @@
 					rel="noopener noreferrer">Open product page</a
 				>{/if}
 		</div>{/if}
-	{#if feedbackArea === 'link' && hasChoices}{@render choicePicker()}{/if}
+	{#if choicesArea === 'link' && hasChoices}{@render choicePicker()}{/if}
 </div>
 
 {@render children?.()}
 
 {#if showPhotoSection}
 	<div class="photo-prefill">
-		{#if photos.length || (hasUndo && feedbackArea === 'image')}<div class="source-actions">
+		{#if photos.length || (hasUndo && patchArea === 'image')}<div class="source-actions">
 				{#if photos.length > 1}<label
 						>Image to read<select bind:value={selectedImage}
 							>{#each photos as photo, index}<option value={index}>{photo.name}</option
@@ -567,7 +585,7 @@
 						disabled={disabled || busy}
 						onclick={() => fill('image')}>Fill from image</button
 					>{/if}
-				{#if hasUndo && feedbackArea === 'image'}<button
+				{#if hasUndo && patchArea === 'image'}<button
 						type="button"
 						class="quiet"
 						{disabled}
@@ -577,8 +595,8 @@
 		{#if photos.length}<small
 				>Sends only the selected image to Google. Crop above first if needed.</small
 			>{/if}
-		{#if feedbackArea === 'image' && message}<p class="muted" role="status">{message}</p>{/if}
-		{#if feedbackArea === 'image' && hasChoices}{@render choicePicker()}{/if}
+		{#if messageArea === 'image' && message}<p class="muted" role="status">{message}</p>{/if}
+		{#if choicesArea === 'image' && hasChoices}{@render choicePicker()}{/if}
 		{#if photoBusy}<p role="status" class="muted">Copying shop photo…</p>{/if}
 		{#if photoMessage}<p role="status" class="muted">{photoMessage}</p>{/if}
 		{#if draft.browserCapture?.imageUrl && !photos.length}<button

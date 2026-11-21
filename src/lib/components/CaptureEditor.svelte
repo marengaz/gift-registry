@@ -45,6 +45,7 @@
 	} = $props();
 	const componentId = $props.id();
 	const couponHelpId = `${componentId}-coupon-help`;
+	const textHelpId = `${componentId}-text-help`;
 	let online = $state(true);
 	let validation = $state('');
 	let showText = $state(false);
@@ -257,7 +258,7 @@
 			>Title <input
 				bind:value={draft.title}
 				oninput={() => markEdited(draft, 'title')}
-				placeholder="Optional — filled from link or photo"
+				placeholder={editing ? 'Product name' : 'Optional — filled from link or photo'}
 			/></label
 		>
 	{/snippet}
@@ -281,17 +282,22 @@
 					<button
 						type="button"
 						class="quiet"
+						aria-expanded={showText}
 						onclick={() => {
 							showText = !showText;
 						}}>Paste text</button
 					>
 				{/snippet}
-				{#if showText}<label
-						>Text to read<textarea
-							rows="3"
-							bind:value={draft.sourceText}
-							placeholder="Paste a caption, product description or message"></textarea></label
-					>{/if}
+				{#if showText}<div class="text-source-field">
+						<label
+							>Text to read<textarea
+								rows="3"
+								aria-describedby={textHelpId}
+								bind:value={draft.sourceText}
+								placeholder="Paste a caption, product description or message"></textarea></label
+						>
+						<small id={textHelpId}>Using Fill from text sends this text to Google.</small>
+					</div>{/if}
 				{@render titleField()}
 				<label
 					>Photos <input
@@ -548,11 +554,17 @@
 	.draft-fields:disabled {
 		opacity: 0.7;
 	}
-	.coupon-field {
+	.coupon-field,
+	.text-source-field {
 		margin: 0.85rem 0;
 	}
-	.coupon-field label {
+	.coupon-field label,
+	.text-source-field label {
 		margin: 0 0 0.35rem;
+	}
+	.text-source-field small {
+		display: block;
+		color: var(--muted);
 	}
 	.list-selection {
 		margin: 1.4rem 0;
