@@ -54,13 +54,20 @@ export const products = sqliteTable(
 		variant: text('variant'),
 		sourceUrl: text('source_url'),
 		sourceText: text('source_text'),
+		couponCode: text('coupon_code'),
 		contributorId: text('contributor_id').notNull(),
 		deletedAt: integer('deleted_at'),
 		deletionToken: text('deletion_token'),
 		createdAt: createdAt(),
 		updatedAt: integer('updated_at').notNull().default(now)
 	},
-	(table) => [index('products_contributor_index').on(table.contributorId)]
+	(table) => [
+		index('products_contributor_index').on(table.contributorId),
+		check(
+			'products_coupon_code_length',
+			sql`${table.couponCode} IS NULL OR length(${table.couponCode}) <= 255`
+		)
+	]
 );
 
 export const entries = sqliteTable(

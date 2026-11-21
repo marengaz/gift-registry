@@ -69,12 +69,20 @@ const offer = z
 		(value) => value.priceMinor == null || !!value.currency,
 		'A priced shopping link needs its currency.'
 	);
+const optionalCouponCode = z
+	.string()
+	.trim()
+	.max(255, 'Coupon code must be 255 characters or fewer.')
+	.nullable()
+	.optional()
+	.transform((value) => value || null);
 export const captureSchema = z.object({
 	title: text,
 	description: optionalText,
 	variant: optionalText,
 	sourceUrl: optionalUrl,
 	sourceText: optionalText,
+	couponCode: optionalCouponCode,
 	listIds: z.array(text).default([]),
 	estimatePence: money.optional(),
 	entryEstimates: z.record(z.string(), money).optional(),
@@ -84,13 +92,17 @@ export const captureSchema = z.object({
 export type CaptureInput = z.infer<typeof captureSchema>;
 export function parseCapture(input: unknown): CaptureInput {
 	const parsed = captureSchema.safeParse(input);
-	if (!parsed.success)
+	if (!parsed.success) {
+		const issue = parsed.error.issues[0]?.message;
 		throw new AccessError(
 			400,
-			parsed.error.issues[0]?.message === 'Use an HTTP or HTTPS link.'
+			issue === 'Use an HTTP or HTTPS link.'
 				? 'Use an HTTP or HTTPS shopping or source link.'
-				: 'Check the title, links and prices. Leave prices unknown if you do not know them.'
+				: issue === 'Coupon code must be 255 characters or fewer.'
+					? issue
+					: 'Check the title, links and prices. Leave prices unknown if you do not know them.'
 		);
+	}
 	return parsed.data;
 }
 function projection(connection: DatabaseConnection, actor: Actor, id: string) {
@@ -162,6 +174,7 @@ export function saveCapture(
 					variant: input.variant,
 					sourceUrl: input.sourceUrl,
 					sourceText: input.sourceText,
+					couponCode: input.couponCode,
 					contributorId: current.userId
 				})
 				.run();
@@ -303,6 +316,7 @@ export function productPatch(connection: DatabaseConnection, event: CatalogueEve
 						variant: input.variant,
 						sourceUrl: input.sourceUrl,
 						sourceText: input.sourceText,
+						couponCode: input.couponCode,
 						updatedAt: Date.now()
 					})
 					.where(eq(products.id, id))

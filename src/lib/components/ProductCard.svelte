@@ -54,6 +54,9 @@
 		{#if entry || compact}<p class="price">
 				{entry ? money(entry.estimatePence) : ideaPriceLabel({ product })}
 			</p>{/if}
+		{#if product.couponCode}<p class="card-coupon">
+				<span class="coupon-tag">{product.couponCode}</span>
+			</p>{/if}
 		{#if product.description}<p class="card-description">{product.description}</p>{/if}
 		<div class="badges">
 			{#each product.labels as label}<span class="badge">{label.name}</span>{/each}
@@ -209,10 +212,28 @@
 		margin: 0;
 		font-size: 0.9rem;
 	}
+	.card-coupon {
+		margin: 0.2rem 0 0.45rem;
+	}
+	.coupon-tag {
+		display: inline-block;
+		font-size: 0.78rem;
+		font-weight: 600;
+		color: var(--accent);
+		background: var(--sage);
+		border: 1px solid var(--line);
+		border-radius: 0.4rem;
+		padding: 0.15rem 0.45rem;
+		overflow-wrap: anywhere;
+	}
 	.compact .card-variant {
 		font-size: 0.8rem;
 		margin: 0;
 		grid-column: 1;
+	}
+	.compact .card-coupon {
+		grid-column: 1;
+		margin: 0.1rem 0;
 	}
 	.compact .card-description,
 	.compact .badges {
